@@ -1,0 +1,8 @@
+# LangChain + LangGraph (для сценария каскадирования).
+# На Windows может потребоваться установка Microsoft C++ Build Tools:
+# https://visualstudio.microsoft.com/visual-cpp-build-tools/
+# Или запуск в WSL. Сначала установите: pip install -r requirements.txt
+langchain-core>=0.2.0
+langchain>=0.2.0
+langchain-community>=0.2.0
+langgraph>=0.0.40

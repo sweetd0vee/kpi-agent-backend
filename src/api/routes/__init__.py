@@ -1,0 +1,1 @@
+# Роуты: documents, chat, dashboard
