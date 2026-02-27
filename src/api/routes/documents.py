@@ -5,6 +5,7 @@
 """
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
@@ -49,7 +50,7 @@ def _get_upload_root():
 @router.post("/upload", response_model=DocumentMeta)
 async def upload_document(
     document_type: str = Query(..., description="Тип документа: chairman_goals, strategy_checklist, ..."),
-    collection_id: str | None = Query(None, description="ID коллекции, в которую добавить документ"),
+    collection_id: Optional[str] = Query(None, description="ID коллекции, в которую добавить документ"),
     file: UploadFile = File(...),
 ):
     """Загрузить документ заданного типа, опционально в коллекцию."""
@@ -82,8 +83,8 @@ async def upload_document(
 
 @router.get("/", response_model=DocumentList)
 async def list_documents(
-    document_type: str | None = Query(None, description="Фильтр по типу документа"),
-    collection_id: str | None = Query(None, description="Фильтр по коллекции"),
+    document_type: Optional[str] = Query(None, description="Фильтр по типу документа"),
+    collection_id: Optional[str] = Query(None, description="Фильтр по коллекции"),
     include_json: bool = Query(False, description="Включать ли parsed_json в ответ"),
 ):
     """Список загруженных документов, опционально по типу и/или коллекции."""

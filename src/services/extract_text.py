@@ -4,13 +4,14 @@
 """
 import io
 from pathlib import Path
+from typing import Optional
 
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 import openpyxl
 
 
-def extract_text_from_file(file_path: Path, content_type: str | None, filename: str) -> str:
+def extract_text_from_file(file_path: Path, content_type: Optional[str], filename: str) -> str:
     """
     Извлекает текст из файла по расширению или content_type.
     Поддерживаются: .txt, .pdf, .docx, .xlsx.
@@ -62,7 +63,7 @@ def extract_text_from_file(file_path: Path, content_type: str | None, filename: 
         return ""
 
 
-def extract_text_from_bytes(data: bytes, filename: str, content_type: str | None = None) -> str:
+def extract_text_from_bytes(data: bytes, filename: str, content_type: Optional[str] = None) -> str:
     """Извлекает текст из байтов (например, из UploadFile)."""
     path = Path(filename)
     suffix = path.suffix.lower()

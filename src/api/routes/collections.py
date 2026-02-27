@@ -1,4 +1,6 @@
 """API коллекций документов базы знаний: создание, переименование, удаление."""
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -29,7 +31,7 @@ async def list_collections():
 
 
 @router.post("", response_model=CollectionMeta)
-async def create_collection(body: CreateCollectionBody | None = None):
+async def create_collection(body: Optional[CreateCollectionBody] = None):
     """Создать коллекцию."""
     name = (body.name if body else "").strip() or "Новая коллекция"
     return store_create(name)

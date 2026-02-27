@@ -8,7 +8,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from src.core.config import settings
 from src.models.knowledge import DocumentType
@@ -52,8 +52,8 @@ def add_document(
     name: str,
     document_type: str,
     relative_path: str,
-    uploaded_at: str | None = None,
-    collection_id: str | None = None,
+    uploaded_at: Optional[str] = None,
+    collection_id: Optional[str] = None,
 ) -> None:
     items = _load_index()
     items.append({
@@ -69,7 +69,7 @@ def add_document(
     _save_index(items)
 
 
-def get_document(document_id: str) -> dict[str, Any] | None:
+def get_document(document_id: str) -> Optional[dict[str, Any]]:
     for d in _load_index():
         if d.get("id") == document_id:
             return d
@@ -77,8 +77,8 @@ def get_document(document_id: str) -> dict[str, Any] | None:
 
 
 def list_documents(
-    document_type: str | None = None,
-    collection_id: str | None = None,
+    document_type: Optional[str] = None,
+    collection_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     items = _load_index()
     if document_type:
@@ -88,7 +88,7 @@ def list_documents(
     return items
 
 
-def get_document_path(document_id: str) -> Path | None:
+def get_document_path(document_id: str) -> Optional[Path]:
     doc = get_document(document_id)
     if not doc:
         return None
@@ -166,7 +166,7 @@ def list_collections() -> list[dict[str, Any]]:
     return _load_collections()
 
 
-def get_collection(collection_id: str) -> dict[str, Any] | None:
+def get_collection(collection_id: str) -> Optional[dict[str, Any]]:
     for c in _load_collections():
         if c.get("id") == collection_id:
             return c
