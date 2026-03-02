@@ -27,3 +27,10 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 - `OPEN_WEBUI_URL` — URL Open Web UI (или другого OpenAI-совместимого API) для предобработки документов
 - `OPEN_WEBUI_API_KEY` — API-ключ
 - `UPLOAD_DIR` — каталог для загрузок (по умолчанию `uploads`)
+- `USE_MINIO` — `true/false`, сохранять файлы в MinIO вместо локальной папки
+- `MINIO_ENDPOINT` — адрес MinIO (например `localhost:9000`)
+- `MINIO_ACCESS_KEY` — ключ доступа
+- `MINIO_SECRET_KEY` — секрет
+- `MINIO_USE_SSL` — `true/false` для https
+
+Если `USE_MINIO=true`, загруженные файлы и результаты предобработки JSON сохраняются в MinIO.

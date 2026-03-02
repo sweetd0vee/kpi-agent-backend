@@ -1,6 +1,7 @@
 """
 Абстракция хранилища файлов: локальная ФС или MinIO (каждый тип документа — свой бакет).
 """
+import io
 from pathlib import Path
 from typing import Optional
 
@@ -45,7 +46,14 @@ def put_file(
     )
     if not client.bucket_exists(bucket):
         client.make_bucket(bucket)
-    client.put_object(bucket, object_key, data=data, length=len(data), content_type=content_type or "application/octet-stream")
+    data_stream = io.BytesIO(data)
+    client.put_object(
+        bucket,
+        object_key,
+        data=data_stream,
+        length=len(data),
+        content_type=content_type or "application/octet-stream",
+    )
 
 
 def get_file(object_key: str, bucket: Optional[str] = None) -> bytes:

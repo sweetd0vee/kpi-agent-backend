@@ -13,6 +13,7 @@ class DocumentMeta(BaseModel):
     uploaded_at: Optional[str] = None
     preprocessed: bool = False  # есть ли сохранённый JSON после LLM
     parsed_json: Optional[dict[str, Any]] = None  # при GET по id или в списке (опционально)
+    parsed_json_path: Optional[str] = None  # путь/ключ JSON-файла (опционально)
 
 
 class CollectionMeta(BaseModel):
@@ -31,4 +32,5 @@ class PreprocessResponse(BaseModel):
     document_id: str
     preprocessed: bool
     parsed_json: Optional[dict[str, Any]] = None
+    parsed_json_path: Optional[str] = None
     error: Optional[str] = None

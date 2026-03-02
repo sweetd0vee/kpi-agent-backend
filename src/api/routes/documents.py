@@ -42,6 +42,7 @@ def _doc_to_meta(d: dict, include_json: bool = False) -> DocumentMeta:
         uploaded_at=d.get("uploaded_at"),
         preprocessed=d.get("preprocessed", False),
         parsed_json=d.get("parsed_json") if include_json else None,
+        parsed_json_path=d.get("parsed_json_path"),
     )
 
 
@@ -169,4 +170,10 @@ async def preprocess_document(document_id: str):
         return PreprocessResponse(document_id=document_id, preprocessed=False, error="LLM не вернул валидный JSON. Проверьте OPEN_WEBUI_URL и OPEN_WEBUI_API_KEY.")
 
     set_parsed_json(document_id, parsed)
-    return PreprocessResponse(document_id=document_id, preprocessed=True, parsed_json=parsed)
+    updated = get_document(document_id)
+    return PreprocessResponse(
+        document_id=document_id,
+        preprocessed=True,
+        parsed_json=parsed,
+        parsed_json_path=updated.get("parsed_json_path") if updated else None,
+    )

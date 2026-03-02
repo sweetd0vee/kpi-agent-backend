@@ -64,6 +64,7 @@ def add_document(
         "relative_path": relative_path,
         "preprocessed": False,
         "parsed_json": None,
+        "parsed_json_path": None,
         "uploaded_at": uploaded_at or datetime.now(timezone.utc).isoformat(),
         "collection_id": collection_id,
     })
@@ -118,6 +119,18 @@ def set_parsed_json(document_id: str, parsed_json: dict[str, Any]) -> bool:
         if d.get("id") == document_id:
             d["preprocessed"] = True
             d["parsed_json"] = parsed_json
+            doc_type = d.get("document_type") or ""
+            existing_path = d.get("parsed_json_path")
+            json_path = existing_path
+            if doc_type:
+                try:
+                    json_path = get_parsed_json_storage_key(doc_type, document_id)
+                    bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
+                    payload = json.dumps(parsed_json, ensure_ascii=False, indent=2).encode("utf-8")
+                    file_storage.put_file(json_path, payload, bucket=bucket, content_type="application/json")
+                except Exception:
+                    json_path = existing_path
+            d["parsed_json_path"] = json_path
             _save_index(items)
             return True
     return False
@@ -152,6 +165,20 @@ def get_storage_path_for_upload(document_type: str, document_id: str, filename: 
     folder = root / document_type
     folder.mkdir(parents=True, exist_ok=True)
     return f"{document_type}/{document_id}_{safe_name}"
+
+
+def get_parsed_json_storage_key(document_type: str, document_id: str) -> str:
+    """
+    Object key для JSON после предобработки.
+    - Локальная ФС: {type}/parsed/{id}.json (относительный путь).
+    - MinIO: parsed/{id}.json (ключ внутри бакета по типу).
+    """
+    if settings.use_minio:
+        return f"parsed/{document_id}.json"
+    root = get_upload_root()
+    folder = root / document_type / "parsed"
+    folder.mkdir(parents=True, exist_ok=True)
+    return f"{document_type}/parsed/{document_id}.json"
 
 
 # --- Коллекции ---
