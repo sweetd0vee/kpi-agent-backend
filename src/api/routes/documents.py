@@ -11,11 +11,14 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 from src.models.documents import DocumentList, DocumentMeta, PreprocessResponse
 from src.models.knowledge import DocumentType
+from src.core.config import settings
+from src.services import file_storage
 from src.services.document_store import (
     add_document,
     delete_document as store_delete,
     generate_document_id,
     get_document,
+    get_document_bytes,
     get_document_path,
     get_storage_path_for_upload,
     list_documents as store_list,
@@ -65,17 +68,12 @@ async def upload_document(
 
     doc_id = generate_document_id()
     filename = file.filename or "file"
-    path = get_storage_path_for_upload(dt.value, doc_id, filename)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(content)
+    object_key = get_storage_path_for_upload(dt.value, doc_id, filename)
+    bucket = file_storage.document_type_to_bucket(dt.value) if settings.use_minio else None
+    file_storage.put_file(object_key, content, bucket=bucket, content_type=file.content_type)
 
-    root = _get_upload_root()
-    try:
-        relative = path.relative_to(root)
-    except ValueError:
-        relative = Path(dt.value) / path.name
     uploaded_at = datetime.now(timezone.utc).isoformat()
-    add_document(doc_id, filename, dt.value, str(relative), uploaded_at=uploaded_at, collection_id=collection_id)
+    add_document(doc_id, filename, dt.value, object_key, uploaded_at=uploaded_at, collection_id=collection_id)
 
     doc = get_document(doc_id)
     return _doc_to_meta(doc)
@@ -149,9 +147,9 @@ async def preprocess_document(document_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
 
-    path = get_document_path(document_id)
-    if not path or not path.exists():
-        raise HTTPException(status_code=404, detail="Файл документа не найден на диске")
+    content = get_document_bytes(document_id)
+    if not content:
+        raise HTTPException(status_code=404, detail="Файл документа не найден в хранилище")
 
     doc_type_str = doc.get("document_type", "")
     try:
@@ -159,8 +157,9 @@ async def preprocess_document(document_id: str):
     except ValueError:
         return PreprocessResponse(document_id=document_id, preprocessed=False, error=f"Неизвестный тип: {doc_type_str}")
 
-    content = path.read_bytes()
-    text = extract_text_from_bytes(content, path.name, None)
+    path = get_document_path(document_id)
+    path_name = path.name if path else doc.get("name") or "file"
+    text = extract_text_from_bytes(content, path_name, None)
     if not text or len(text.strip()) < 10:
         return PreprocessResponse(document_id=document_id, preprocessed=False, error="Не удалось извлечь текст из файла")
 

@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from src.core.config import settings
 from src.models.knowledge import DocumentType
+from src.services import file_storage
 
 
 def get_upload_root() -> Path:
@@ -89,10 +90,26 @@ def list_documents(
 
 
 def get_document_path(document_id: str) -> Optional[Path]:
+    """Путь к файлу на диске (только для USE_MINIO=false). Для MinIO используйте get_document_bytes."""
+    if settings.use_minio:
+        return None
     doc = get_document(document_id)
     if not doc:
         return None
     return get_upload_root() / doc["relative_path"]
+
+
+def get_document_bytes(document_id: str) -> Optional[bytes]:
+    """Содержимое файла документа (работает и для локальной ФС, и для MinIO)."""
+    doc = get_document(document_id)
+    if not doc:
+        return None
+    key = doc["relative_path"]
+    bucket = file_storage.document_type_to_bucket(doc["document_type"]) if settings.use_minio else None
+    try:
+        return file_storage.get_file(key, bucket=bucket)
+    except Exception:
+        return None
 
 
 def set_parsed_json(document_id: str, parsed_json: dict[str, Any]) -> bool:
@@ -110,24 +127,31 @@ def delete_document(document_id: str) -> bool:
     doc = get_document(document_id)
     if not doc:
         return False
-    path = get_upload_root() / doc["relative_path"]
-    if path.exists():
-        try:
-            path.unlink()
-        except OSError:
-            pass
+    key = doc["relative_path"]
+    bucket = file_storage.document_type_to_bucket(doc["document_type"]) if settings.use_minio else None
+    file_storage.delete_file(key, bucket=bucket)
     items = [d for d in _load_index() if d.get("id") != document_id]
     _save_index(items)
     return True
 
 
-def get_storage_path_for_upload(document_type: str, document_id: str, filename: str) -> Path:
-    """Путь для сохранения загруженного файла: uploads/{type}/{id}_{filename}."""
+def _safe_filename(filename: str) -> str:
+    return "".join(c for c in filename if c.isalnum() or c in "._- ") or "file"
+
+
+def get_storage_path_for_upload(document_type: str, document_id: str, filename: str) -> str:
+    """
+    Object key для сохранения загруженного файла.
+    - Локальная ФС: {type}/{id}_{filename} (относительный путь).
+    - MinIO: {id}_{filename} (ключ внутри бакета по типу).
+    """
+    safe_name = _safe_filename(filename)
+    if settings.use_minio:
+        return f"{document_id}_{safe_name}"
     root = get_upload_root()
     folder = root / document_type
     folder.mkdir(parents=True, exist_ok=True)
-    safe_name = "".join(c for c in filename if c.isalnum() or c in "._- ") or "file"
-    return folder / f"{document_id}_{safe_name}"
+    return f"{document_type}/{document_id}_{safe_name}"
 
 
 # --- Коллекции ---

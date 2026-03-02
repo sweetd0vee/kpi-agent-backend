@@ -9,7 +9,13 @@ from .core.config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup: инициализация графов LangGraph, подключений при необходимости
+    # startup: MinIO — создать бакеты по типам документов при необходимости
+    if settings.use_minio:
+        try:
+            from .services.file_storage import ensure_buckets_exist
+            ensure_buckets_exist()
+        except Exception:
+            pass  # MinIO может быть ещё недоступен
     yield
     # shutdown
     pass
