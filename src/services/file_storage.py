@@ -4,8 +4,25 @@
 import io
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from src.core.config import DOCUMENT_TYPE_TO_BUCKET, settings
+
+
+def _minio_endpoint() -> str:
+    """Endpoint для Minio(): только host:port, без схемы и пути (клиент не принимает path)."""
+    raw = (settings.minio_endpoint or "").strip()
+    if not raw:
+        return "localhost:9000"
+    if "://" in raw:
+        parsed = urlparse(raw)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or (443 if parsed.scheme == "https" else 9000)
+        return f"{host}:{port}"
+    # уже "host:port" — убрать путь если есть
+    if "/" in raw:
+        raw = raw.split("/")[0]
+    return raw
 
 
 def document_type_to_bucket(document_type: str) -> str:
@@ -39,7 +56,7 @@ def put_file(
     from minio import Minio
 
     client = Minio(
-        settings.minio_endpoint,
+        _minio_endpoint(),
         access_key=settings.minio_access_key,
         secret_key=settings.minio_secret_key,
         secure=settings.minio_use_ssl,
@@ -69,7 +86,7 @@ def get_file(object_key: str, bucket: Optional[str] = None) -> bytes:
     from minio import Minio
 
     client = Minio(
-        settings.minio_endpoint,
+        _minio_endpoint(),
         access_key=settings.minio_access_key,
         secret_key=settings.minio_secret_key,
         secure=settings.minio_use_ssl,
@@ -101,7 +118,7 @@ def delete_file(object_key: str, bucket: Optional[str] = None) -> bool:
     from minio import Minio
 
     client = Minio(
-        settings.minio_endpoint,
+        _minio_endpoint(),
         access_key=settings.minio_access_key,
         secret_key=settings.minio_secret_key,
         secure=settings.minio_use_ssl,
@@ -120,7 +137,7 @@ def ensure_buckets_exist() -> None:
     from minio import Minio
 
     client = Minio(
-        settings.minio_endpoint,
+        _minio_endpoint(),
         access_key=settings.minio_access_key,
         secret_key=settings.minio_secret_key,
         secure=settings.minio_use_ssl,

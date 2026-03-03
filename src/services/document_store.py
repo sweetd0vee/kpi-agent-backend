@@ -71,6 +71,38 @@ def add_document(
     _save_index(items)
 
 
+def add_document_from_parsed(
+    collection_id: str,
+    document_type: str,
+    name: str,
+    parsed_json: dict[str, Any],
+) -> str:
+    """
+    Создать документ в коллекции из уже полученного parsed_json (JSON сохраняется в хранилище).
+    Возвращает id нового документа.
+    """
+    doc_id = generate_document_id()
+    json_path = get_parsed_json_storage_key(document_type, doc_id)
+    bucket = file_storage.document_type_to_bucket(document_type) if settings.use_minio else None
+    payload = json.dumps(parsed_json, ensure_ascii=False, indent=2).encode("utf-8")
+    file_storage.put_file(json_path, payload, bucket=bucket, content_type="application/json")
+    uploaded_at = datetime.now(timezone.utc).isoformat()
+    items = _load_index()
+    items.append({
+        "id": doc_id,
+        "name": name,
+        "document_type": document_type,
+        "relative_path": json_path,
+        "preprocessed": True,
+        "parsed_json": parsed_json,
+        "parsed_json_path": json_path,
+        "uploaded_at": uploaded_at,
+        "collection_id": collection_id,
+    })
+    _save_index(items)
+    return doc_id
+
+
 def get_document(document_id: str) -> Optional[dict[str, Any]]:
     for d in _load_index():
         if d.get("id") == document_id:
@@ -206,11 +238,29 @@ def generate_collection_id() -> str:
 def create_collection(name: str) -> dict[str, Any]:
     cid = generate_collection_id()
     now = datetime.now(timezone.utc).isoformat()
-    col = {"id": cid, "name": name.strip() or "Без названия", "created_at": now, "updated_at": now}
+    col = {
+        "id": cid,
+        "name": name.strip() or "Без названия",
+        "created_at": now,
+        "updated_at": now,
+        "open_webui_knowledge_id": None,
+    }
     items = _load_collections()
     items.append(col)
     _save_collections(items)
     return col
+
+
+def set_collection_open_webui_knowledge_id(collection_id: str, knowledge_id: str) -> bool:
+    """Сохранить id коллекции знаний Open Web UI для синхронизации."""
+    items = _load_collections()
+    for c in items:
+        if c.get("id") == collection_id:
+            c["open_webui_knowledge_id"] = knowledge_id
+            c["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _save_collections(items)
+            return True
+    return False
 
 
 def list_collections() -> list[dict[str, Any]]:
