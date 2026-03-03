@@ -289,14 +289,21 @@ def delete_collection(collection_id: str) -> bool:
     items = [c for c in _load_collections() if c.get("id") != collection_id]
     if len(items) == len(_load_collections()):
         return False
-    _save_collections(items)
-    # Отвязать документы от коллекции (не удалять файлы)
+    # Удалить все файлы документов коллекции (локальная ФС и/или MinIO по бакетам)
+    docs_in_collection = list_documents(collection_id=collection_id)
+    for doc in docs_in_collection:
+        doc_type = doc.get("document_type") or ""
+        bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
+        # основной файл (загруженный или parsed JSON)
+        file_storage.delete_file(doc["relative_path"], bucket=bucket)
+        # отдельный parsed JSON, если отличается от relative_path
+        parsed_path = doc.get("parsed_json_path")
+        if parsed_path and parsed_path != doc.get("relative_path"):
+            file_storage.delete_file(parsed_path, bucket=bucket)
+    # Удалить документы из индекса
     doc_items = _load_index()
-    changed = False
-    for d in doc_items:
-        if d.get("collection_id") == collection_id:
-            d["collection_id"] = None
-            changed = True
-    if changed:
-        _save_index(doc_items)
+    doc_items = [d for d in doc_items if d.get("collection_id") != collection_id]
+    _save_index(doc_items)
+    # Удалить коллекцию
+    _save_collections(items)
     return True

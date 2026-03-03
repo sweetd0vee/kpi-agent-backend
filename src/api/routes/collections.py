@@ -124,7 +124,7 @@ async def update_collection(collection_id: str, body: UpdateCollectionBody):
 
 @router.delete("/{collection_id}")
 async def delete_collection(collection_id: str):
-    """Удалить коллекцию (документы отвязываются, не удаляются)."""
+    """Удалить коллекцию и все файлы её документов (в т.ч. в MinIO по бакетам)."""
     if not store_delete(collection_id):
         raise HTTPException(status_code=404, detail="Коллекция не найдена")
     return {"status": "ok"}
