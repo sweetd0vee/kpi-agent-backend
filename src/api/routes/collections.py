@@ -10,6 +10,7 @@ from src.models.documents import CollectionMeta
 from src.services.document_preprocess import run_preprocess
 from src.services.document_store import (
     TEMPLATE_COLLECTION_ID,
+    TEMPLATE_DOCUMENT_TYPES,
     add_document_from_parsed,
     copy_document_to_collection,
     create_collection as store_create,
@@ -188,6 +189,12 @@ async def generate_collection_json(collection_id: str):
     for d in docs:
         doc_id = d.get("id")
         if not doc_id:
+            continue
+        doc_type = d.get("document_type") or ""
+        # Бизнес-план, Стратегия и Регламент из настроек не обрабатываем через LLM — они уже проверены
+        if doc_type in TEMPLATE_DOCUMENT_TYPES:
+            if copy_document_to_collection(doc_id, new_col["id"]):
+                processed += 1
             continue
         # Предобработать, если ещё не обработан
         if not d.get("preprocessed"):
