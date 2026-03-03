@@ -14,6 +14,8 @@ class DocumentMeta(BaseModel):
     preprocessed: bool = False  # есть ли сохранённый JSON после LLM
     parsed_json: Optional[dict[str, Any]] = None  # при GET по id или в списке (опционально)
     parsed_json_path: Optional[str] = None  # путь/ключ JSON-файла (опционально)
+    open_webui_synced: Optional[bool] = None  # при загрузке в коллекцию: удалось ли синхронизировать с OWU
+    open_webui_error: Optional[str] = None  # при загрузке: ошибка синхронизации с Open Web UI
 
 
 class CollectionMeta(BaseModel):

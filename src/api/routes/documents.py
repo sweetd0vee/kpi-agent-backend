@@ -29,7 +29,12 @@ from src.services.open_webui_client import sync_file_to_knowledge
 router = APIRouter()
 
 
-def _doc_to_meta(d: dict, include_json: bool = False) -> DocumentMeta:
+def _doc_to_meta(
+    d: dict,
+    include_json: bool = False,
+    open_webui_synced: Optional[bool] = None,
+    open_webui_error: Optional[str] = None,
+) -> DocumentMeta:
     return DocumentMeta(
         id=d["id"],
         name=d["name"],
@@ -41,6 +46,8 @@ def _doc_to_meta(d: dict, include_json: bool = False) -> DocumentMeta:
         preprocessed=d.get("preprocessed", False),
         parsed_json=d.get("parsed_json") if include_json else None,
         parsed_json_path=d.get("parsed_json_path"),
+        open_webui_synced=open_webui_synced,
+        open_webui_error=open_webui_error,
     )
 
 
@@ -74,18 +81,24 @@ async def upload_document(
     uploaded_at = datetime.now(timezone.utc).isoformat()
     add_document(doc_id, filename, dt.value, object_key, uploaded_at=uploaded_at, collection_id=collection_id)
 
+    open_webui_synced: Optional[bool] = None
+    open_webui_error: Optional[str] = None
     if collection_id:
         col = get_collection(collection_id)
         if col and col.get("open_webui_knowledge_id"):
-            sync_file_to_knowledge(
+            if sync_file_to_knowledge(
                 col["open_webui_knowledge_id"],
                 content,
                 filename,
                 file.content_type,
-            )
+            ):
+                open_webui_synced = True
+            else:
+                open_webui_synced = False
+                open_webui_error = "Не удалось загрузить файл в Open Web UI (таймаут или ошибка API)"
 
     doc = get_document(doc_id)
-    return _doc_to_meta(doc)
+    return _doc_to_meta(doc, open_webui_synced=open_webui_synced, open_webui_error=open_webui_error)
 
 
 @router.get("/", response_model=DocumentList)

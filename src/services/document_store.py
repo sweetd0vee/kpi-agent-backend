@@ -15,6 +15,14 @@ from src.models.knowledge import DocumentType
 from src.services import file_storage
 
 
+# Коллекция-шаблон: документы, загружаемые один раз в настройках (Бизнес-план, Стратегия, Регламент).
+# При создании новой коллекции они автоматически копируются в неё.
+TEMPLATE_COLLECTION_ID = "__template__"
+
+# Типы документов, хранящиеся как шаблон (загружаются на вкладке «Настройки»).
+TEMPLATE_DOCUMENT_TYPES = ("business_plan_checklist", "strategy_checklist", "reglament_checklist")
+
+
 def get_upload_root() -> Path:
     root = Path(settings.upload_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -178,6 +186,30 @@ def delete_document(document_id: str) -> bool:
     items = [d for d in _load_index() if d.get("id") != document_id]
     _save_index(items)
     return True
+
+
+def copy_document_to_collection(document_id: str, collection_id: str) -> Optional[str]:
+    """
+    Скопировать документ (файл) в другую коллекцию. Возвращает id нового документа или None.
+    """
+    doc = get_document(document_id)
+    if not doc:
+        return None
+    content = get_document_bytes(document_id)
+    if not content:
+        return None
+    new_id = generate_document_id()
+    name = doc.get("name") or "file"
+    doc_type = doc.get("document_type") or ""
+    object_key = get_storage_path_for_upload(doc_type, new_id, name)
+    bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
+    try:
+        file_storage.put_file(object_key, content, bucket=bucket, content_type=None)
+    except Exception:
+        return None
+    uploaded_at = datetime.now(timezone.utc).isoformat()
+    add_document(new_id, name, doc_type, object_key, uploaded_at=uploaded_at, collection_id=collection_id)
+    return new_id
 
 
 def _safe_filename(filename: str) -> str:

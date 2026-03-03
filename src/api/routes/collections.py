@@ -9,7 +9,9 @@ from src.core.config import settings
 from src.models.documents import CollectionMeta
 from src.services.document_preprocess import run_preprocess
 from src.services.document_store import (
+    TEMPLATE_COLLECTION_ID,
     add_document_from_parsed,
+    copy_document_to_collection,
     create_collection as store_create,
     delete_collection as store_delete,
     get_collection,
@@ -42,9 +44,14 @@ async def list_collections():
 
 @router.post("", response_model=CollectionMeta)
 async def create_collection(body: Optional[CreateCollectionBody] = None):
-    """Создать коллекцию в базе знаний и дублировать её в Open Web UI (Knowledge)."""
+    """Создать коллекцию в базе знаний и дублировать её в Open Web UI (Knowledge).
+    Документы из шаблона (Бизнес-план, Стратегия, Регламент из Настроек) автоматически копируются в новую коллекцию."""
     name = (body.name if body else "").strip() or "Новая коллекция"
     col = store_create(name)
+    # Скопировать шаблонные документы (загруженные один раз в Настройках) в новую коллекцию
+    template_docs = store_list_documents(collection_id=TEMPLATE_COLLECTION_ID)
+    for td in template_docs:
+        copy_document_to_collection(td["id"], col["id"])
     owu_id, _ = create_knowledge(name)
     if owu_id:
         set_collection_open_webui_knowledge_id(col["id"], owu_id)
@@ -64,10 +71,25 @@ async def get_collection_by_id(collection_id: str):
 class CollectionContextResponse(BaseModel):
     """Текстовый контекст коллекции для подстановки в промпт (содержимое документов)."""
     content: str
+    document_count: int = 0
+    """Всего документов в коллекции."""
+    included_count: int = 0
+    """Документов с успешно загруженным содержимым (для остальных — заглушка)."""
 
 
 # Максимум символов сырого текста на документ (чтобы контекст не раздувался)
 _MAX_RAW_TEXT_PER_DOC = 35000
+
+
+def _filename_for_extract(d: dict) -> str:
+    """Имя файла с расширением для extract_text (по name или relative_path)."""
+    name = (d.get("name") or "").strip() or "file"
+    if "." in name:
+        return name
+    rel = (d.get("relative_path") or "").strip()
+    if rel:
+        return rel.split("/")[-1] if "/" in rel else rel
+    return name
 
 
 @router.get("/{collection_id}/context", response_model=CollectionContextResponse)
@@ -82,6 +104,7 @@ async def get_collection_context(collection_id: str):
         raise HTTPException(status_code=404, detail="Коллекция не найдена")
     docs = store_list_documents(collection_id=collection_id)
     parts = []
+    included_count = 0
     for d in docs:
         name = d.get("name") or d.get("id") or "документ"
         parsed = d.get("parsed_json")
@@ -90,19 +113,21 @@ async def get_collection_context(collection_id: str):
             parsed = full.get("parsed_json") if full else None
         if parsed:
             parts.append(f"## {name}\n{json.dumps(parsed, ensure_ascii=False, indent=2)}")
+            included_count += 1
         else:
             raw_content = get_document_bytes(d["id"]) if d.get("id") else None
             if raw_content:
                 try:
                     raw_text = extract_text_from_bytes(
                         raw_content,
-                        d.get("name") or "file",
+                        _filename_for_extract(d),
                         None,
                     )
                     if raw_text and len(raw_text.strip()) > 0:
                         if len(raw_text) > _MAX_RAW_TEXT_PER_DOC:
                             raw_text = raw_text[:_MAX_RAW_TEXT_PER_DOC] + "\n\n[... текст обрезан ...]"
                         parts.append(f"## {name}\n(исходный текст документа)\n\n{raw_text}")
+                        included_count += 1
                     else:
                         parts.append(f"## {name}\n(не удалось извлечь текст из файла)")
                 except Exception:
@@ -110,7 +135,11 @@ async def get_collection_context(collection_id: str):
             else:
                 parts.append(f"## {name}\n(файл не найден)")
     content = "\n\n".join(parts) if parts else "(В коллекции нет документов.)"
-    return CollectionContextResponse(content=content)
+    return CollectionContextResponse(
+        content=content,
+        document_count=len(docs),
+        included_count=included_count,
+    )
 
 
 @router.patch("/{collection_id}", response_model=CollectionMeta)

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.routes import chat, collections, dashboard, documents
+from .api.routes import chat, collections, dashboard, documents, settings as settings_router
 from .core.config import settings
 
 
@@ -38,6 +38,7 @@ app.add_middleware(
 
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
 app.include_router(collections.router, prefix="/api/collections", tags=["collections"])
+app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 
