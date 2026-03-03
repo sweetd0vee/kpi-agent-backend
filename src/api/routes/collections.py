@@ -20,6 +20,7 @@ from src.services.document_store import (
     set_collection_open_webui_knowledge_id,
     update_collection as store_update,
 )
+from src.services.extract_text import extract_text_from_bytes
 from src.services.open_webui_client import create_knowledge, sync_file_to_knowledge
 
 router = APIRouter()
@@ -65,12 +66,16 @@ class CollectionContextResponse(BaseModel):
     content: str
 
 
+# Максимум символов сырого текста на документ (чтобы контекст не раздувался)
+_MAX_RAW_TEXT_PER_DOC = 35000
+
+
 @router.get("/{collection_id}/context", response_model=CollectionContextResponse)
 async def get_collection_context(collection_id: str):
     """
     Вернуть содержимое всех документов коллекции в виде одного текста.
-    Для обработанных документов используется parsed_json; для остальных — пометка.
-    Используется чатом для передачи контекста модели.
+    Для обработанных документов — parsed_json; для остальных — извлечённый из файла текст,
+    чтобы модель могла работать и с необработанными коллекциями.
     """
     col = get_collection(collection_id)
     if not col:
@@ -86,8 +91,25 @@ async def get_collection_context(collection_id: str):
         if parsed:
             parts.append(f"## {name}\n{json.dumps(parsed, ensure_ascii=False, indent=2)}")
         else:
-            parts.append(f"## {name}\n(документ ещё не обработан в JSON)")
-    content = "\n\n".join(parts) if parts else "(В коллекции нет документов или ни один не обработан.)"
+            raw_content = get_document_bytes(d["id"]) if d.get("id") else None
+            if raw_content:
+                try:
+                    raw_text = extract_text_from_bytes(
+                        raw_content,
+                        d.get("name") or "file",
+                        None,
+                    )
+                    if raw_text and len(raw_text.strip()) > 0:
+                        if len(raw_text) > _MAX_RAW_TEXT_PER_DOC:
+                            raw_text = raw_text[:_MAX_RAW_TEXT_PER_DOC] + "\n\n[... текст обрезан ...]"
+                        parts.append(f"## {name}\n(исходный текст документа)\n\n{raw_text}")
+                    else:
+                        parts.append(f"## {name}\n(не удалось извлечь текст из файла)")
+                except Exception:
+                    parts.append(f"## {name}\n(ошибка извлечения текста)")
+            else:
+                parts.append(f"## {name}\n(файл не найден)")
+    content = "\n\n".join(parts) if parts else "(В коллекции нет документов.)"
     return CollectionContextResponse(content=content)
 
 
