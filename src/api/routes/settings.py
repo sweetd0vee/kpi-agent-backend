@@ -97,12 +97,11 @@ async def upload_template_document(
         except Exception:
             pass
 
-    # Удалить предыдущий шаблон этого типа, если был
+    # Удалить все предыдущие шаблоны этого типа (на случай дубликатов)
     existing = store_list_documents(collection_id=TEMPLATE_COLLECTION_ID)
     for ex in existing:
         if ex.get("document_type") == document_type:
             delete_document(ex["id"])
-            break
 
     doc_id = generate_document_id()
     object_key = get_storage_path_for_upload(document_type, doc_id, filename)
