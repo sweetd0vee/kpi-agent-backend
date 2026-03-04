@@ -9,7 +9,12 @@ from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
-from src.models.documents import DocumentList, DocumentMeta, PreprocessResponse
+from src.models.documents import (
+    DepartmentChecklistSubmit,
+    DocumentList,
+    DocumentMeta,
+    PreprocessResponse,
+)
 from src.models.knowledge import DocumentType
 from src.core.config import settings
 from src.services import file_storage
@@ -22,8 +27,9 @@ from src.services.document_store import (
     get_document_path,
     get_storage_path_for_upload,
     list_documents as store_list,
+    set_parsed_json,
 )
-from src.services.document_preprocess import run_preprocess
+from src.services.document_preprocess import run_department_regulation_extract, run_preprocess
 from src.services.open_webui_client import sync_file_to_knowledge
 
 router = APIRouter()
@@ -169,3 +175,40 @@ async def preprocess_document(document_id: str):
     if not result.preprocessed and result.error and "не найден" in result.error.lower():
         raise HTTPException(status_code=404, detail=result.error)
     return result
+
+
+@router.post("/{document_id}/process-department-regulation", response_model=PreprocessResponse)
+async def process_department_regulation(document_id: str):
+    """
+    Обработать документ «Положение о департаменте» через LLM: извлечь цели и задачи в виде чеклиста.
+    Результат возвращается для валидации пользователем; в хранилище не сохраняется.
+    """
+    result = run_department_regulation_extract(document_id)
+    if result.error and "не найден" in result.error.lower():
+        raise HTTPException(status_code=404, detail=result.error)
+    if result.error and "только для документов типа" in result.error.lower():
+        raise HTTPException(status_code=400, detail=result.error)
+    return result
+
+
+@router.post("/{document_id}/submit-department-checklist", response_model=DocumentMeta)
+async def submit_department_checklist(document_id: str, body: DepartmentChecklistSubmit):
+    """
+    Сохранить проверенный пользователем чеклист по положению о департаменте:
+    JSON записывается в хранилище (MinIO/FS) и привязывается к документу в коллекции.
+    """
+    doc = get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    if doc.get("document_type") != "department_goals_checklist":
+        raise HTTPException(status_code=400, detail="Только для документов типа «Положение о департаменте»")
+
+    payload = {
+        "department": body.department or "",
+        "goals": [g.model_dump() for g in body.goals],
+        "tasks": [t.model_dump() for t in body.tasks],
+    }
+    if not set_parsed_json(document_id, payload):
+        raise HTTPException(status_code=500, detail="Не удалось сохранить чеклист")
+    updated = get_document(document_id)
+    return _doc_to_meta(updated)

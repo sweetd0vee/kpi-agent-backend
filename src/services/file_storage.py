@@ -53,6 +53,8 @@ def put_file(
         path.write_bytes(data)
         return
 
+    if not bucket:
+        raise ValueError("При USE_MINIO=true необходимо передать bucket (тип документа)")
     from minio import Minio
 
     client = Minio(

@@ -67,6 +67,18 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 - Swagger: http://localhost:8000/docs  
 - Health: http://localhost:8000/health  
 
+### Обработка «Положения о департаменте» (Ollama)
+
+По умолчанию для извлечения целей и задач из документа используется **Ollama** (`USE_OLLAMA_FOR_PREPROCESS=true`). Чтобы обработка не зависала и не шла слишком долго:
+
+1. **Модель по умолчанию** — `qwen2.5:7b` (быстрая, хорошо даёт JSON). Установка: `ollama pull qwen2.5:7b`.
+2. В `.env` при необходимости:
+   - `OLLAMA_PREPROCESS_MODEL=qwen2.5:7b` (или другая 7B–8B модель).
+   - `OLLAMA_PREPROCESS_TIMEOUT=180` — таймаут запроса в секундах (для больших моделей 70B можно 300–600).
+3. Запуск Ollama: `ollama serve` (обычно уже запущен при установке).
+
+Если использовать Open Web UI вместо Ollama: `USE_OLLAMA_FOR_PREPROCESS=false`, задать `OPEN_WEBUI_URL` и `OPEN_WEBUI_API_KEY`.
+
 ---
 
 ## Что запускать в Docker

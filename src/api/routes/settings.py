@@ -80,6 +80,14 @@ async def upload_template_document(
     if not content:
         raise HTTPException(status_code=400, detail="Пустой файл")
 
+    # При MinIO — убедиться, что бакеты существуют (на случай если при старте MinIO был недоступен)
+    if settings.use_minio:
+        try:
+            from src.services.file_storage import ensure_buckets_exist
+            ensure_buckets_exist()
+        except Exception:
+            pass
+
     # Удалить предыдущий шаблон этого типа, если был
     existing = store_list_documents(collection_id=TEMPLATE_COLLECTION_ID)
     for ex in existing:
@@ -91,7 +99,13 @@ async def upload_template_document(
     filename = file.filename or "file"
     object_key = get_storage_path_for_upload(document_type, doc_id, filename)
     bucket = file_storage.document_type_to_bucket(document_type) if settings.use_minio else None
-    file_storage.put_file(object_key, content, bucket=bucket, content_type=file.content_type)
+    try:
+        file_storage.put_file(object_key, content, bucket=bucket, content_type=file.content_type)
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Не удалось сохранить файл в хранилище (MinIO/FS): {e!s}",
+        )
 
     from datetime import datetime, timezone
     uploaded_at = datetime.now(timezone.utc).isoformat()

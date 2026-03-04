@@ -49,10 +49,13 @@ async def create_collection(body: Optional[CreateCollectionBody] = None):
     Документы из шаблона (Бизнес-план, Стратегия, Регламент из Настроек) автоматически копируются в новую коллекцию."""
     name = (body.name if body else "").strip() or "Новая коллекция"
     col = store_create(name)
-    # Скопировать шаблонные документы (загруженные один раз в Настройках) в новую коллекцию
+    # Скопировать шаблонные документы (загруженные в Настройках) в новую коллекцию (в т.ч. из MinIO)
     template_docs = store_list_documents(collection_id=TEMPLATE_COLLECTION_ID)
     for td in template_docs:
-        copy_document_to_collection(td["id"], col["id"])
+        try:
+            copy_document_to_collection(td["id"], col["id"])
+        except Exception:
+            pass  # не ломаем создание коллекции, если один шаблон не скопировался
     owu_id, _ = create_knowledge(name)
     if owu_id:
         set_collection_open_webui_knowledge_id(col["id"], owu_id)

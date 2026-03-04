@@ -145,8 +145,11 @@ def get_document_bytes(document_id: str) -> Optional[bytes]:
     doc = get_document(document_id)
     if not doc:
         return None
-    key = doc["relative_path"]
-    bucket = file_storage.document_type_to_bucket(doc["document_type"]) if settings.use_minio else None
+    key = doc.get("relative_path") or ""
+    doc_type = doc.get("document_type") or ""
+    if not key or not doc_type:
+        return None
+    bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
     try:
         return file_storage.get_file(key, bucket=bucket)
     except Exception:
@@ -180,9 +183,14 @@ def delete_document(document_id: str) -> bool:
     doc = get_document(document_id)
     if not doc:
         return False
-    key = doc["relative_path"]
-    bucket = file_storage.document_type_to_bucket(doc["document_type"]) if settings.use_minio else None
-    file_storage.delete_file(key, bucket=bucket)
+    key = doc.get("relative_path") or ""
+    doc_type = doc.get("document_type") or ""
+    if key and doc_type:
+        bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
+        try:
+            file_storage.delete_file(key, bucket=bucket)
+        except Exception:
+            pass  # удаляем запись из индекса даже если файл в хранилище не найден
     items = [d for d in _load_index() if d.get("id") != document_id]
     _save_index(items)
     return True

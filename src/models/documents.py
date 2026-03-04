@@ -36,3 +36,17 @@ class PreprocessResponse(BaseModel):
     parsed_json: Optional[dict[str, Any]] = None
     parsed_json_path: Optional[str] = None
     error: Optional[str] = None
+
+
+class DepartmentChecklistItem(BaseModel):
+    id: str = ""
+    text: str = ""
+    section: str = ""
+    checked: bool = False
+
+
+class DepartmentChecklistSubmit(BaseModel):
+    """Тело запроса для сохранения проверенного пользователем чеклиста по положению о департаменте."""
+    department: Optional[str] = None
+    goals: List[DepartmentChecklistItem] = []
+    tasks: List[DepartmentChecklistItem] = []
