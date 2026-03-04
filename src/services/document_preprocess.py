@@ -21,13 +21,18 @@ from src.services.preprocess_prompts import (
 
 
 def _llm_json_error_message() -> str:
-    if getattr(settings, "use_ollama_for_preprocess", True):
+    use_ollama = getattr(settings, "use_ollama_for_preprocess", True)
+    has_openwebui = bool((settings.open_webui_api_key or "").strip())
+    if use_ollama:
         model = getattr(settings, "ollama_preprocess_model", "qwen3:8b")
-        return (
+        base_msg = (
             f"LLM не вернул валидный JSON. Проверьте: Ollama запущен (ollama serve), "
             f"модель установлена (ollama pull {model}). Для быстрой обработки используйте модель 7B–8B; "
             f"при таймауте увеличьте OLLAMA_PREPROCESS_TIMEOUT в .env."
         )
+        if has_openwebui:
+            return base_msg + " Если Ollama недоступен, можно переключиться на Open Web UI."
+        return base_msg
     return (
         "LLM не вернул валидный JSON. Проверьте OPEN_WEBUI_URL и OPEN_WEBUI_API_KEY."
     )

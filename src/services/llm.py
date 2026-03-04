@@ -3,6 +3,7 @@
 Используется в чате и для предобработки документов базы знаний.
 """
 import json
+import logging
 import re
 from typing import Any, Optional
 
@@ -135,26 +136,38 @@ def preprocess_document_to_json(
     ]
     use_ollama = getattr(settings, "use_ollama_for_preprocess", True)
     ollama_model = getattr(settings, "ollama_preprocess_model", "qwen3:8b")
-    if use_ollama:
-        client = get_ollama_client()
-        model = model or ollama_model
-        try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=messages,
+    has_openwebui = bool((settings.open_webui_api_key or "").strip())
+
+    def call_ollama() -> str:
+        return (
+            chat_completion(
+                messages,
+                model=model or ollama_model,
                 temperature=0.1,
+                use_ollama=True,
+                timeout=getattr(settings, "ollama_preprocess_timeout", 180.0),
             )
-            if resp.choices and len(resp.choices) > 0:
-                msg = resp.choices[0].message
-                raw = (msg.content or "").strip() if msg else ""
-            else:
-                raw = ""
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning("Ollama preprocess failed: %s", e)
-            raw = ""
+            or ""
+        )
+
+    def call_openwebui() -> str:
+        return (
+            chat_completion(
+                messages,
+                model=model or "gpt-4o-mini",
+                temperature=0.1,
+                use_ollama=False,
+            )
+            or ""
+        )
+
+    if use_ollama:
+        raw = call_ollama()
+        if not raw and has_openwebui:
+            logging.getLogger(__name__).warning("Ollama preprocess failed, trying Open Web UI fallback.")
+            raw = call_openwebui()
     else:
-        raw = chat_completion(messages, model=model or "gpt-4o-mini", temperature=0.1) or ""
+        raw = call_openwebui()
     if not raw:
         return None
     return _extract_json_from_text(raw)
