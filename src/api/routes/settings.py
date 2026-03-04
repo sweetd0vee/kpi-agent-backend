@@ -2,12 +2,15 @@
 Настройки приложения: шаблонные документы (Бизнес-план, Стратегия, Регламент).
 Загружаются один раз на вкладке «Настройки» и автоматически подставляются в каждую новую коллекцию.
 """
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
-from src.models.documents import DocumentMeta
+from src.models.documents import DocumentMeta, PreprocessResponse, TemplateChecklistSubmit
 from src.models.knowledge import DocumentType
+from src.services.document_preprocess import run_preprocess
+from src.services.checklist_normalize import normalize_checklist_json
 from src.services.document_store import (
     TEMPLATE_COLLECTION_ID,
     TEMPLATE_DOCUMENT_TYPES,
@@ -17,6 +20,7 @@ from src.services.document_store import (
     get_document,
     get_storage_path_for_upload,
     list_documents as store_list_documents,
+    set_parsed_json,
 )
 from src.core.config import settings
 from src.services import file_storage
@@ -76,6 +80,11 @@ async def upload_template_document(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Неизвестный тип документа: {document_type}")
 
+    filename = file.filename or "file"
+    ext = Path(filename).suffix.lower()
+    if ext not in {".docx", ".txt"}:
+        raise HTTPException(status_code=400, detail="Файл должен быть в формате .docx или .txt")
+
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Пустой файл")
@@ -96,7 +105,6 @@ async def upload_template_document(
             break
 
     doc_id = generate_document_id()
-    filename = file.filename or "file"
     object_key = get_storage_path_for_upload(document_type, doc_id, filename)
     bucket = file_storage.document_type_to_bucket(document_type) if settings.use_minio else None
     try:
@@ -120,3 +128,38 @@ async def upload_template_document(
 
     doc = get_document(doc_id)
     return _doc_to_meta(doc)
+
+
+@router.post("/template-documents/{document_id}/preprocess", response_model=PreprocessResponse)
+async def preprocess_template_document(document_id: str):
+    """Обработать шаблонный документ через LLM и сохранить JSON."""
+    doc = get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    if doc.get("collection_id") != TEMPLATE_COLLECTION_ID:
+        raise HTTPException(status_code=400, detail="Документ не является шаблонным")
+    if doc.get("document_type") not in TEMPLATE_DOCUMENT_TYPES:
+        raise HTTPException(status_code=400, detail="Документ не относится к шаблонам")
+    return run_preprocess(document_id)
+
+
+@router.post("/template-documents/{document_id}/submit", response_model=DocumentMeta)
+async def submit_template_document(document_id: str, body: TemplateChecklistSubmit):
+    """Сохранить проверенный пользователем JSON для шаблонного документа."""
+    doc = get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    if doc.get("collection_id") != TEMPLATE_COLLECTION_ID:
+        raise HTTPException(status_code=400, detail="Документ не является шаблонным")
+    doc_type = doc.get("document_type") or ""
+    if doc_type not in TEMPLATE_DOCUMENT_TYPES:
+        raise HTTPException(status_code=400, detail="Документ не относится к шаблонам")
+    normalized = normalize_checklist_json(doc_type, body.parsed_json or {})
+    if doc_type in ("strategy_checklist", "business_plan_checklist") and not isinstance(normalized.get("items"), list):
+        raise HTTPException(status_code=400, detail="Ожидается JSON с полем items")
+    if doc_type == "reglament_checklist" and not isinstance(normalized.get("rules"), list):
+        raise HTTPException(status_code=400, detail="Ожидается JSON с полем rules")
+    if not set_parsed_json(document_id, normalized):
+        raise HTTPException(status_code=500, detail="Не удалось сохранить JSON")
+    updated = get_document(document_id)
+    return _doc_to_meta(updated)

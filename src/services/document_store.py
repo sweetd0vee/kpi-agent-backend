@@ -29,6 +29,10 @@ def get_upload_root() -> Path:
     return root
 
 
+def _bucket_for_doc_type(document_type: str) -> Optional[str]:
+    return file_storage.document_type_to_bucket(document_type) if settings.use_minio else None
+
+
 def get_collections_path() -> Path:
     return get_upload_root() / "collections.json"
 
@@ -91,7 +95,7 @@ def add_document_from_parsed(
     """
     doc_id = generate_document_id()
     json_path = get_parsed_json_storage_key(document_type, doc_id)
-    bucket = file_storage.document_type_to_bucket(document_type) if settings.use_minio else None
+    bucket = _bucket_for_doc_type(document_type)
     payload = json.dumps(parsed_json, ensure_ascii=False, indent=2).encode("utf-8")
     file_storage.put_file(json_path, payload, bucket=bucket, content_type="application/json")
     uploaded_at = datetime.now(timezone.utc).isoformat()
@@ -149,7 +153,7 @@ def get_document_bytes(document_id: str) -> Optional[bytes]:
     doc_type = doc.get("document_type") or ""
     if not key or not doc_type:
         return None
-    bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
+    bucket = _bucket_for_doc_type(doc_type)
     try:
         return file_storage.get_file(key, bucket=bucket)
     except Exception:
@@ -168,7 +172,7 @@ def set_parsed_json(document_id: str, parsed_json: dict[str, Any]) -> bool:
             if doc_type:
                 try:
                     json_path = get_parsed_json_storage_key(doc_type, document_id)
-                    bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
+                    bucket = _bucket_for_doc_type(doc_type)
                     payload = json.dumps(parsed_json, ensure_ascii=False, indent=2).encode("utf-8")
                     file_storage.put_file(json_path, payload, bucket=bucket, content_type="application/json")
                 except Exception:
@@ -186,11 +190,17 @@ def delete_document(document_id: str) -> bool:
     key = doc.get("relative_path") or ""
     doc_type = doc.get("document_type") or ""
     if key and doc_type:
-        bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
+        bucket = _bucket_for_doc_type(doc_type)
         try:
             file_storage.delete_file(key, bucket=bucket)
         except Exception:
             pass  # удаляем запись из индекса даже если файл в хранилище не найден
+        parsed_path = doc.get("parsed_json_path")
+        if parsed_path and parsed_path != key:
+            try:
+                file_storage.delete_file(parsed_path, bucket=bucket)
+            except Exception:
+                pass
     items = [d for d in _load_index() if d.get("id") != document_id]
     _save_index(items)
     return True
@@ -210,13 +220,19 @@ def copy_document_to_collection(document_id: str, collection_id: str) -> Optiona
     name = doc.get("name") or "file"
     doc_type = doc.get("document_type") or ""
     object_key = get_storage_path_for_upload(doc_type, new_id, name)
-    bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
+    bucket = _bucket_for_doc_type(doc_type)
     try:
         file_storage.put_file(object_key, content, bucket=bucket, content_type=None)
     except Exception:
         return None
     uploaded_at = datetime.now(timezone.utc).isoformat()
     add_document(new_id, name, doc_type, object_key, uploaded_at=uploaded_at, collection_id=collection_id)
+    parsed = doc.get("parsed_json")
+    if isinstance(parsed, dict) and parsed:
+        try:
+            set_parsed_json(new_id, parsed)
+        except Exception:
+            pass
     return new_id
 
 
@@ -333,7 +349,7 @@ def delete_collection(collection_id: str) -> bool:
     docs_in_collection = list_documents(collection_id=collection_id)
     for doc in docs_in_collection:
         doc_type = doc.get("document_type") or ""
-        bucket = file_storage.document_type_to_bucket(doc_type) if settings.use_minio else None
+        bucket = _bucket_for_doc_type(doc_type)
         # основной файл (загруженный или parsed JSON)
         file_storage.delete_file(doc["relative_path"], bucket=bucket)
         # отдельный parsed JSON, если отличается от relative_path

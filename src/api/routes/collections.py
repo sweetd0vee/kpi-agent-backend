@@ -196,8 +196,21 @@ async def generate_collection_json(collection_id: str):
         doc_type = d.get("document_type") or ""
         # Бизнес-план, Стратегия и Регламент из настроек не обрабатываем через LLM — они уже проверены
         if doc_type in TEMPLATE_DOCUMENT_TYPES:
-            if copy_document_to_collection(doc_id, new_col["id"]):
+            updated = get_document(doc_id)
+            parsed = updated.get("parsed_json") if updated else None
+            if isinstance(parsed, dict) and parsed:
+                name_suffix = " (JSON)" if not (d.get("name") or "").endswith(" (JSON)") else ""
+                add_document_from_parsed(
+                    new_col["id"],
+                    doc_type,
+                    (d.get("name") or "document") + name_suffix,
+                    parsed,
+                )
                 processed += 1
+            elif copy_document_to_collection(doc_id, new_col["id"]):
+                processed += 1
+            else:
+                errors.append(f"{d.get('name', doc_id)}: не удалось скопировать шаблон")
             continue
         # Предобработать, если ещё не обработан
         if not d.get("preprocessed"):

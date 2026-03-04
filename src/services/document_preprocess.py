@@ -22,7 +22,7 @@ from src.services.preprocess_prompts import (
 
 def _llm_json_error_message() -> str:
     if getattr(settings, "use_ollama_for_preprocess", True):
-        model = getattr(settings, "ollama_preprocess_model", "qwen2.5:7b")
+        model = getattr(settings, "ollama_preprocess_model", "qwen3:8b")
         return (
             f"LLM не вернул валидный JSON. Проверьте: Ollama запущен (ollama serve), "
             f"модель установлена (ollama pull {model}). Для быстрой обработки используйте модель 7B–8B; "

@@ -50,3 +50,13 @@ class DepartmentChecklistSubmit(BaseModel):
     department: Optional[str] = None
     goals: List[DepartmentChecklistItem] = []
     tasks: List[DepartmentChecklistItem] = []
+
+
+class TemplateChecklistSubmit(BaseModel):
+    """Тело запроса для сохранения проверенного шаблонного чеклиста (БП/Стратегия/Регламент)."""
+    parsed_json: dict[str, Any]
+
+
+class ChecklistSubmit(BaseModel):
+    """Тело запроса для сохранения проверенного чеклиста пользователя."""
+    parsed_json: dict[str, Any]

@@ -34,11 +34,16 @@ def chat_completion(
     messages: list[dict[str, str]],
     model: str = "gpt-4o-mini",
     temperature: float = 0.2,
+    use_ollama: Optional[bool] = None,
+    timeout: Optional[float] = None,
 ) -> Optional[str]:
     """
     Один запрос к LLM. Возвращает текст ответа или None при ошибке.
     """
-    client = get_openai_client()
+    if use_ollama:
+        client = get_ollama_client(timeout=timeout)
+    else:
+        client = get_openai_client()
     if not client:
         return None
     try:
@@ -129,7 +134,7 @@ def preprocess_document_to_json(
         {"role": "user", "content": content},
     ]
     use_ollama = getattr(settings, "use_ollama_for_preprocess", True)
-    ollama_model = getattr(settings, "ollama_preprocess_model", "qwen2.5:7b")
+    ollama_model = getattr(settings, "ollama_preprocess_model", "qwen3:8b")
     if use_ollama:
         client = get_ollama_client()
         model = model or ollama_model

@@ -4,12 +4,12 @@
 Форматы: PDF, DOCX, XLSX, TXT.
 """
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 from src.models.documents import (
+    ChecklistSubmit,
     DepartmentChecklistSubmit,
     DocumentList,
     DocumentMeta,
@@ -24,12 +24,12 @@ from src.services.document_store import (
     generate_document_id,
     get_collection,
     get_document,
-    get_document_path,
     get_storage_path_for_upload,
     list_documents as store_list,
     set_parsed_json,
 )
 from src.services.document_preprocess import run_department_regulation_extract, run_preprocess
+from src.services.checklist_normalize import normalize_checklist_json
 from src.services.open_webui_client import sync_file_to_knowledge
 
 router = APIRouter()
@@ -55,11 +55,6 @@ def _doc_to_meta(
         open_webui_synced=open_webui_synced,
         open_webui_error=open_webui_error,
     )
-
-
-def _get_upload_root():
-    from src.services.document_store import get_upload_root
-    return get_upload_root()
 
 
 @router.post("/upload", response_model=DocumentMeta)
@@ -115,14 +110,8 @@ async def list_documents(
 ):
     """Список загруженных документов, опционально по типу и/или коллекции."""
     items = store_list(document_type=document_type, collection_id=collection_id)
-    root = _get_upload_root()
     out = []
     for d in items:
-        rel = d.get("relative_path", "")
-        full = root / rel
-        if not full.is_absolute():
-            full = root / rel
-        d["uploaded_at"] = d.get("uploaded_at")
         out.append(_doc_to_meta(d, include_json=include_json))
     return DocumentList(items=out, total=len(out))
 
@@ -209,6 +198,29 @@ async def submit_department_checklist(document_id: str, body: DepartmentChecklis
         "tasks": [t.model_dump() for t in body.tasks],
     }
     if not set_parsed_json(document_id, payload):
+        raise HTTPException(status_code=500, detail="Не удалось сохранить чеклист")
+    updated = get_document(document_id)
+    return _doc_to_meta(updated)
+
+
+@router.post("/{document_id}/submit-checklist", response_model=DocumentMeta)
+async def submit_document_checklist(document_id: str, body: ChecklistSubmit):
+    """
+    Сохранить проверенный пользователем чеклист (БП/Стратегия/Регламент) для загруженного документа.
+    JSON записывается в хранилище и привязывается к документу.
+    """
+    doc = get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    doc_type = doc.get("document_type") or ""
+    if doc_type not in ("strategy_checklist", "business_plan_checklist", "reglament_checklist"):
+        raise HTTPException(status_code=400, detail="Только для чеклистов: бизнес-план, стратегия, регламент")
+    normalized = normalize_checklist_json(doc_type, body.parsed_json or {})
+    if doc_type in ("strategy_checklist", "business_plan_checklist") and not isinstance(normalized.get("items"), list):
+        raise HTTPException(status_code=400, detail="Ожидается JSON с полем items")
+    if doc_type == "reglament_checklist" and not isinstance(normalized.get("rules"), list):
+        raise HTTPException(status_code=400, detail="Ожидается JSON с полем rules")
+    if not set_parsed_json(document_id, normalized):
         raise HTTPException(status_code=500, detail="Не удалось сохранить чеклист")
     updated = get_document(document_id)
     return _doc_to_meta(updated)

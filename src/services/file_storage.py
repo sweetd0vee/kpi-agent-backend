@@ -36,6 +36,28 @@ def _fs_root() -> Path:
     return root
 
 
+def _require_bucket(bucket: Optional[str]) -> str:
+    if not bucket:
+        raise ValueError("При USE_MINIO=true необходимо передать bucket (тип документа)")
+    return bucket
+
+
+def _minio_client():
+    from minio import Minio
+
+    return Minio(
+        _minio_endpoint(),
+        access_key=settings.minio_access_key,
+        secret_key=settings.minio_secret_key,
+        secure=settings.minio_use_ssl,
+    )
+
+
+def _ensure_bucket(client, bucket: str) -> None:
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+
+
 def put_file(
     object_key: str,
     data: bytes,
@@ -53,18 +75,9 @@ def put_file(
         path.write_bytes(data)
         return
 
-    if not bucket:
-        raise ValueError("При USE_MINIO=true необходимо передать bucket (тип документа)")
-    from minio import Minio
-
-    client = Minio(
-        _minio_endpoint(),
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=settings.minio_use_ssl,
-    )
-    if not client.bucket_exists(bucket):
-        client.make_bucket(bucket)
+    bucket = _require_bucket(bucket)
+    client = _minio_client()
+    _ensure_bucket(client, bucket)
     data_stream = io.BytesIO(data)
     client.put_object(
         bucket,
@@ -85,14 +98,8 @@ def get_file(object_key: str, bucket: Optional[str] = None) -> bytes:
         path = _fs_root() / object_key
         return path.read_bytes()
 
-    from minio import Minio
-
-    client = Minio(
-        _minio_endpoint(),
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=settings.minio_use_ssl,
-    )
+    bucket = _require_bucket(bucket)
+    client = _minio_client()
     response = client.get_object(bucket, object_key)
     try:
         return response.read()
@@ -117,14 +124,8 @@ def delete_file(object_key: str, bucket: Optional[str] = None) -> bool:
                 return False
         return True
 
-    from minio import Minio
-
-    client = Minio(
-        _minio_endpoint(),
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=settings.minio_use_ssl,
-    )
+    bucket = _require_bucket(bucket)
+    client = _minio_client()
     try:
         client.remove_object(bucket, object_key)
         return True
@@ -136,14 +137,6 @@ def ensure_buckets_exist() -> None:
     """Создать все бакеты MinIO при старте (если USE_MINIO=true)."""
     if not settings.use_minio:
         return
-    from minio import Minio
-
-    client = Minio(
-        _minio_endpoint(),
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=settings.minio_use_ssl,
-    )
+    client = _minio_client()
     for bucket in set(DOCUMENT_TYPE_TO_BUCKET.values()):
-        if not client.bucket_exists(bucket):
-            client.make_bucket(bucket)
+        _ensure_bucket(client, bucket)

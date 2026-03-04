@@ -4,6 +4,7 @@
 """
 from fastapi import APIRouter, HTTPException
 
+from src.core.config import settings
 from src.models.chat import ChatRequest, ChatResponse, CascadeRequest, CascadeResponse
 from src.services.chat_context import get_documents_combined_text
 from src.services.llm import chat_completion
@@ -39,7 +40,7 @@ async def chat_completions(request: ChatRequest):
     messages = [{"role": "system", "content": system_content}]
     for m in request.messages:
         messages.append({"role": m.role, "content": m.content})
-    model = request.model or "gpt-4o-mini"
+    model = request.model or settings.llm_chat_model
     content = chat_completion(messages, model=model, temperature=0.2)
     if content is None:
         raise HTTPException(
@@ -78,8 +79,18 @@ async def run_cascade(request: CascadeRequest):
     else:
         context = {}
 
+    use_ollama = getattr(settings, "use_ollama_for_cascade", False)
+    model = settings.ollama_cascade_model if use_ollama else settings.llm_cascade_model
+    timeout = settings.ollama_cascade_timeout if use_ollama else None
+
     def invoke_llm(messages: list[dict]) -> str:
-        out = chat_completion(messages, model="gpt-4o-mini", temperature=0.1)
+        out = chat_completion(
+            messages,
+            model=model,
+            temperature=0.1,
+            use_ollama=use_ollama,
+            timeout=timeout,
+        )
         return out or ""
 
     graph = build_cascade_graph(invoke_llm)
