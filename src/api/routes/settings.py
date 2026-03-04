@@ -62,9 +62,9 @@ async def upload_template_document(
     file: UploadFile = File(...),
 ):
     """
-    Загрузить или заменить шаблонный документ одного из типов:
-    business_plan_checklist, strategy_checklist, reglament_checklist.
-    Файл будет автоматически подставляться во все новые коллекции.
+    Загрузить или заменить шаблонный документ одного из типов.
+    При USE_MINIO=true файл сохраняется в MinIO в бакет по типу (business-plan, strategy, regulation).
+    Шаблоны загружаются один раз и автоматически копируются в каждую новую коллекцию и используются в контексте для LLM.
     """
     if document_type not in TEMPLATE_DOCUMENT_TYPES:
         raise HTTPException(
