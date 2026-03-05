@@ -6,7 +6,7 @@ services:
     container_name: ai-kpi_db
     restart: unless-stopped
     ports:
-      - "5433:5432"
+      - "5434:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ai-kpi}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -16,7 +16,7 @@ services:
     networks:
       - ai-kpi
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ai_kpi}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ai-kpi}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,8 +29,8 @@ services:
     container_name: ai-kpi-be
     hostname: ai-kpi_api
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/ai_kpi}
-      POSTGRES_DB: ${POSTGRES_DB:-ai_kpi}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/ai-kpi}
+      POSTGRES_DB: ${POSTGRES_DB:-ai-kpi}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       USE_MINIO: ${USE_MINIO:-false}
