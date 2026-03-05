@@ -88,6 +88,8 @@ services:
     container_name: ai-kpi_openwebui
     environment:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD}
     depends_on:
       ollama:
         condition: service_started
