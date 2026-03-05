@@ -25,8 +25,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/app/Dockerfile
-    image: ai-kpi-backend:local
-    container_name: ai-kpi_api
+    image: sber/ai-kpi-backend
+    container_name: ai-kpi-backend
     hostname: ai-kpi_api
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/ai_kpi}
@@ -84,3 +84,4 @@ services:
 networks:
   ai-kpi:
     name: ai-kpi
+    external: true

@@ -29,12 +29,20 @@ from src.services.open_webui_client import create_knowledge, sync_file_to_knowle
 router = APIRouter()
 
 
-class CreateCollectionBody(BaseModel):
+class CollectionCardBody(BaseModel):
+    department: Optional[str] = None
+    period: Optional[str] = None
+    responsibles: Optional[str] = None
+    summary: Optional[str] = None
+    status: Optional[str] = None
+
+
+class CreateCollectionBody(CollectionCardBody):
     name: str = "Новая коллекция"
 
 
-class UpdateCollectionBody(BaseModel):
-    name: str
+class UpdateCollectionBody(CollectionCardBody):
+    name: Optional[str] = None
 
 
 @router.get("", response_model=list[CollectionMeta])
@@ -48,7 +56,14 @@ async def create_collection(body: Optional[CreateCollectionBody] = None):
     """Создать коллекцию в базе знаний и дублировать её в Open Web UI (Knowledge).
     Документы из шаблона (Бизнес-план, Стратегия, Регламент из Настроек) автоматически копируются в новую коллекцию."""
     name = (body.name if body else "").strip() or "Новая коллекция"
-    col = store_create(name)
+    col = store_create(
+        name,
+        department=body.department if body else None,
+        period=body.period if body else None,
+        responsibles=body.responsibles if body else None,
+        summary=body.summary if body else None,
+        status=body.status if body else None,
+    )
     # Скопировать шаблонные документы (загруженные в Настройках) в новую коллекцию (в т.ч. из MinIO)
     template_docs = store_list_documents(collection_id=TEMPLATE_COLLECTION_ID)
     for td in template_docs:
@@ -149,7 +164,15 @@ async def get_collection_context(collection_id: str):
 @router.patch("/{collection_id}", response_model=CollectionMeta)
 async def update_collection(collection_id: str, body: UpdateCollectionBody):
     """Переименовать коллекцию."""
-    if not store_update(collection_id, body.name):
+    if not store_update(
+        collection_id,
+        name=body.name,
+        department=body.department,
+        period=body.period,
+        responsibles=body.responsibles,
+        summary=body.summary,
+        status=body.status,
+    ):
         raise HTTPException(status_code=404, detail="Коллекция не найдена")
     col = get_collection(collection_id)
     return col
@@ -185,7 +208,14 @@ async def generate_collection_json(collection_id: str):
         raise HTTPException(status_code=400, detail="В коллекции нет документов")
 
     new_name = (col.get("name") or "Коллекция").strip() + " (JSON)"
-    new_col = store_create(new_name)
+    new_col = store_create(
+        new_name,
+        department=col.get("department"),
+        period=col.get("period"),
+        responsibles=col.get("responsibles"),
+        summary=col.get("summary"),
+        status=col.get("status"),
+    )
     processed = 0
     errors: list[str] = []
 

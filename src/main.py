@@ -3,7 +3,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.routes import chat, collections, dashboard, documents, kpi, ppr, settings as settings_router
+from .api.routes import (
+    chat,
+    collections,
+    dashboard,
+    departments,
+    documents,
+    kpi,
+    ppr,
+    reference,
+    settings as settings_router,
+)
 from .core.config import settings
 from .db.database import init_db
 
@@ -45,6 +55,8 @@ app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(kpi.router, prefix="/api/kpi", tags=["kpi"])
 app.include_router(ppr.router, prefix="/api/ppr", tags=["ppr"])
+app.include_router(reference.router, prefix="/api/reference", tags=["reference"])
+app.include_router(departments.router, prefix="/api/departments", tags=["departments"])
 
 
 @app.get("/")

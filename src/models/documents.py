@@ -23,6 +23,11 @@ class CollectionMeta(BaseModel):
     name: str
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    department: Optional[str] = None
+    period: Optional[str] = None
+    responsibles: Optional[str] = None
+    summary: Optional[str] = None
+    status: Optional[str] = None
 
 
 class DocumentList(BaseModel):

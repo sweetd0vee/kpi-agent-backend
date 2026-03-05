@@ -1,7 +1,7 @@
 """
 Хранение метаданных и путей загруженных документов базы знаний.
 Файлы лежат в upload_dir по типам; индекс — upload_dir/index.json.
-Коллекции — upload_dir/collections.json (id, name, created_at, updated_at).
+Коллекции — upload_dir/collections.json (id, name, created_at, updated_at, карточка).
 Документ может принадлежать коллекции (collection_id).
 """
 import json
@@ -291,7 +291,14 @@ def generate_collection_id() -> str:
     return str(uuid.uuid4())
 
 
-def create_collection(name: str) -> dict[str, Any]:
+def create_collection(
+    name: str,
+    department: Optional[str] = None,
+    period: Optional[str] = None,
+    responsibles: Optional[str] = None,
+    summary: Optional[str] = None,
+    status: Optional[str] = None,
+) -> dict[str, Any]:
     cid = generate_collection_id()
     now = datetime.now(timezone.utc).isoformat()
     col = {
@@ -300,6 +307,11 @@ def create_collection(name: str) -> dict[str, Any]:
         "created_at": now,
         "updated_at": now,
         "open_webui_knowledge_id": None,
+        "department": department or "",
+        "period": period or "",
+        "responsibles": responsibles or "",
+        "summary": summary or "",
+        "status": status or "",
     }
     items = _load_collections()
     items.append(col)
@@ -330,12 +342,39 @@ def get_collection(collection_id: str) -> Optional[dict[str, Any]]:
     return None
 
 
-def update_collection(collection_id: str, name: str) -> bool:
+def update_collection(
+    collection_id: str,
+    name: Optional[str] = None,
+    department: Optional[str] = None,
+    period: Optional[str] = None,
+    responsibles: Optional[str] = None,
+    summary: Optional[str] = None,
+    status: Optional[str] = None,
+) -> bool:
     items = _load_collections()
     for c in items:
         if c.get("id") == collection_id:
-            c["name"] = name.strip() or c["name"]
-            c["updated_at"] = datetime.now(timezone.utc).isoformat()
+            updated = False
+            if name is not None:
+                c["name"] = name.strip() or c["name"]
+                updated = True
+            if department is not None:
+                c["department"] = department
+                updated = True
+            if period is not None:
+                c["period"] = period
+                updated = True
+            if responsibles is not None:
+                c["responsibles"] = responsibles
+                updated = True
+            if summary is not None:
+                c["summary"] = summary
+                updated = True
+            if status is not None:
+                c["status"] = status
+                updated = True
+            if updated:
+                c["updated_at"] = datetime.now(timezone.utc).isoformat()
             _save_collections(items)
             return True
     return False

@@ -25,3 +25,10 @@ class KpiRow(GoalRowMixin, Base):
 
 class PprRow(GoalRowMixin, Base):
     __tablename__ = "ppr"
+
+
+class Department(Base):
+    __tablename__ = "departments"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
