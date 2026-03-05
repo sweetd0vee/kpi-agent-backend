@@ -73,10 +73,12 @@ services:
     image: ollama/ollama:latest
     container_name: ai-kpi_ollama
     hostname: ollama
+    environment:
+      OLLAMA_MODELS: /models
     ports:
       - "11434:11434"
     volumes:
-      - ollama_data:/root/.ollama
+      - ${OLLAMA_MODELS_DIR:-../../ollama-models}:/models
     networks:
       - ai-kpi
     restart: unless-stopped
@@ -106,5 +108,4 @@ volumes:
   postgres_data:
   uploads_data:
   minio_data:
-  ollama_data:
   open_webui_data:
