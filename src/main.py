@@ -9,6 +9,7 @@ from .api.routes import (
     dashboard,
     departments,
     documents,
+    leaders,
     kpi,
     ppr,
     reference,
@@ -57,6 +58,7 @@ app.include_router(kpi.router, prefix="/api/kpi", tags=["kpi"])
 app.include_router(ppr.router, prefix="/api/ppr", tags=["ppr"])
 app.include_router(reference.router, prefix="/api/reference", tags=["reference"])
 app.include_router(departments.router, prefix="/api/departments", tags=["departments"])
+app.include_router(leaders.router, prefix="/api/leaders", tags=["leaders"])
 
 
 @app.get("/")

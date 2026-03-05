@@ -12,6 +12,7 @@ def _db_to_schema(row: KpiRow) -> GoalRow:
     return GoalRow(
         id=row.id,
         lastName=row.last_name,
+        leaderId=row.leader_id,
         goal=row.goal,
         metricGoals=row.metric_goals,
         weightQ=row.weight_q,
@@ -29,6 +30,7 @@ def _schema_to_db(row: GoalRow) -> KpiRow:
     return KpiRow(
         id=row.id,
         last_name=row.lastName or "",
+        leader_id=row.leaderId or None,
         goal=row.goal or "",
         metric_goals=row.metricGoals or "",
         weight_q=row.weightQ or "",

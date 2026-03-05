@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class GoalRow(BaseModel):
     id: str
     lastName: str = ""
+    leaderId: Optional[str] = None
     goal: str = ""
     metricGoals: str = ""
     weightQ: str = ""
