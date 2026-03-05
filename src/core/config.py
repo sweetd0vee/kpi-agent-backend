@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # Таймаут запроса к Ollama при каскаде (секунды).
     ollama_cascade_timeout: float = 300.0
     upload_dir: str = "uploads"  # каталог для загруженных файлов базы знаний
+    database_url: str = "sqlite:///./ai-kpi.db"
 
     # MinIO (S3-совместимое хранилище)
     use_minio: bool = False

@@ -1,0 +1,103 @@
+name: sokol
+
+services:
+  db:
+    image: postgres:16-bookworm
+    container_name: sokol_db
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ~/docker-share/postgres-data-sokol:/var/lib/postgresql/data
+    networks:
+      - sokol
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-sokol_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: sber/sokol-be:master
+    container_name: sokol_api
+    hostname: sokol_api
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SOKOL_IMAGES_DIR: ${SOKOL_IMAGES_DIR}
+      SOKOL_IMAGE_WIDTH_CM: ${SOKOL_IMAGE_WIDTH_CM}
+      SOKOL_LT_URL: ${SOKOL_LT_URL}
+      SOKOL_LT_LANG: ${SOKOL_LT_LANG}
+      SOKOL_MAX_UPLOAD_MB: ${SOKOL_MAX_UPLOAD_MB}
+    depends_on:
+      db:
+        condition: service_healthy
+      languagetool:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    networks:
+      - sokol
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    hostname: minio
+    command: server --console-address ":9001" /data
+    ports:
+      - 9000:9000
+      - 9001:9001
+    environment:
+      SERVICE_9000_NAME: minio
+      SERVICE_9000_CHECK_TCP: true
+      SERVICE_9000_CHECK_INTERVAL: 30s
+      SERVICE_9000_CHECK_TIMEOUT: 5s
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    volumes:
+      - ~/docker-share/minio:/data
+    networks:
+      - sokol
+    restart: unless-stopped
+
+  mail:
+    image: jcalonso/mailhog:v1.0.1
+    container_name: mail
+    hostname: mail
+    domainname: service.consul
+    environment:
+      MAILHOG_USERNAME: ${MAIL_USERNAME}
+      MAILHOG_PASSWORD: ${MAIL_PASSWORD}
+    ports:
+      - 25:${MAIL_PORT}
+      - 8025:8025
+    networks:
+      - sokol
+    restart: unless-stopped
+
+  languagetool:
+    image: silviof/docker-languagetool:latest
+    container_name: sokol_languagetool
+    hostname: sokol_languagetool
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    networks:
+      - sokol
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8010/v2/languages >/dev/null || exit 1"]
+      start_period: 60s
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+
+networks:
+  sokol:
+    name: sokol
