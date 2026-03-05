@@ -12,7 +12,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     networks:
       - ai-kpi
     healthcheck:
@@ -25,8 +25,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/app/Dockerfile
-    image: sber/ai-kpi-backend
-    container_name: ai-kpi-backend
+    image: ai-kpi-be
+    container_name: ai-kpi-be
     hostname: ai-kpi_api
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/ai_kpi}
@@ -48,7 +48,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data/uploads:/app/uploads
+      - uploads_data:/app/uploads
     networks:
       - ai-kpi
 
@@ -64,7 +64,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
     volumes:
-      - ./data/minio:/data
+      - minio_data:/data
     networks:
       - ai-kpi
     restart: unless-stopped
@@ -76,7 +76,7 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ./data/ollama:/root/.ollama
+      - ollama_data:/root/.ollama
     networks:
       - ai-kpi
     restart: unless-stopped
@@ -85,3 +85,9 @@ networks:
   ai-kpi:
     name: ai-kpi
     external: true
+
+volumes:
+  postgres_data:
+  uploads_data:
+  minio_data:
+  ollama_data:
