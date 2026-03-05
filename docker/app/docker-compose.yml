@@ -81,6 +81,22 @@ services:
       - ai-kpi
     restart: unless-stopped
 
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: ai-kpi_openwebui
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+    depends_on:
+      ollama:
+        condition: service_started
+    ports:
+      - "3000:8080"
+    volumes:
+      - open_webui_data:/app/backend/data
+    networks:
+      - ai-kpi
+    restart: unless-stopped
+
 networks:
   ai-kpi:
     name: ai-kpi
@@ -91,3 +107,4 @@ volumes:
   uploads_data:
   minio_data:
   ollama_data:
+  open_webui_data:
