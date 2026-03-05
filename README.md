@@ -61,7 +61,8 @@ npm run dev   # http://localhost:5173
 cd kpi-agent-backend
 # venv\Scripts\activate   # Windows
 pip install -r requirements.txt
-uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn src.main:app uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+--reload --host 0.0.0.0 --port 8000
 ```
 - API: http://localhost:8000  
 - Swagger: http://localhost:8000/docs  
