@@ -56,13 +56,19 @@ npm run dev   # http://localhost:5173
 | **chat** | `POST /completions`, `POST /cascade` |
 | **dashboard** | `GET /goals`, `GET /metrics` |
 
+### База данных
+При старте приложения создаются **4 таблицы** в PostgreSQL: `kpi`, `ppr`, `leaders`, `departments`. Подключение задаётся через `DATABASE_URL` в `.env` (по умолчанию `postgresql+psycopg://postgres:postgres@localhost:5434/ai-kpi` при маппинге порта 5434 в docker-compose). Импорт таблицы КПЭ/ППР на фронте сохраняет данные в эти таблицы через `PUT /api/kpi` и `PUT /api/ppr`.
+
+Если таблицы не появились (БД была недоступна при старте), создайте их вручную:
+- **Через API (удобнее всего):** запустите бэкенд, затем откройте http://localhost:8000/docs → раздел **db** → **POST /api/db/init** → Execute (или `curl -X POST http://localhost:8000/api/db/init`).
+- **Скрипт (тот же Python, что и приложение):** из каталога `kpi-agent-backend` выполните `scripts\init_db.bat` — он сам поставит зависимости и создаст таблицы. Либо: `python -m pip install -r requirements.txt`, затем `python scripts/init_db.py`.
+
 ### Запуск
 ```bash
 cd kpi-agent-backend
 # venv\Scripts\activate   # Windows
 pip install -r requirements.txt
-uvicorn src.main:app uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
---reload --host 0.0.0.0 --port 8000
+uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 - API: http://localhost:8000  
 - Swagger: http://localhost:8000/docs  

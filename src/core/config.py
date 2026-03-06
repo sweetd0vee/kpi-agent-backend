@@ -36,7 +36,8 @@ class Settings(BaseSettings):
     # Таймаут запроса к Ollama при каскаде (секунды).
     ollama_cascade_timeout: float = 300.0
     upload_dir: str = "uploads"  # каталог для загруженных файлов базы знаний
-    database_url: str = "postgresql+psycopg://postgres:postgres@db:5432/ai-kpi"
+    # Локальный запуск: порт 5434 при маппинге 5434:5432 в docker-compose; в Docker задайте DATABASE_URL с хостом db
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5434/ai-kpi"
 
     # MinIO (S3-совместимое хранилище)
     use_minio: bool = False

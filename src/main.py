@@ -7,6 +7,7 @@ from .api.routes import (
     chat,
     collections,
     dashboard,
+    db as db_router,
     departments,
     documents,
     leaders,
@@ -19,9 +20,23 @@ from .core.config import settings
 from .db.database import init_db
 
 
+def _init_db_with_retry(max_attempts: int = 5, delay_sec: float = 2.0) -> None:
+    import time
+    last_exc = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            init_db()
+            return
+        except Exception as e:
+            last_exc = e
+            if attempt < max_attempts:
+                time.sleep(delay_sec)
+    raise last_exc
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    _init_db_with_retry()
     # startup: MinIO — создать бакеты по типам документов при необходимости
     if settings.use_minio:
         try:
@@ -59,6 +74,7 @@ app.include_router(ppr.router, prefix="/api/ppr", tags=["ppr"])
 app.include_router(reference.router, prefix="/api/reference", tags=["reference"])
 app.include_router(departments.router, prefix="/api/departments", tags=["departments"])
 app.include_router(leaders.router, prefix="/api/leaders", tags=["leaders"])
+app.include_router(db_router.router, prefix="/api/db", tags=["db"])
 
 
 @app.get("/")

@@ -1,8 +1,12 @@
-from sqlalchemy import create_engine
+import logging
+
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from src.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _build_engine() -> Engine:
@@ -25,9 +29,16 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    from . import models  # noqa: F401
+    # Импорт всех моделей регистрирует таблицы в Base.metadata (kpi, ppr, leaders, departments)
+    from .models import Department, KpiRow, Leader, PprRow  # noqa: F401
 
+    table_names = list(Base.metadata.tables.keys())
+    logger.info("Creating tables: %s", table_names)
     Base.metadata.create_all(bind=engine)
+    with engine.connect() as conn:
+        inspector = inspect(conn)
+        existing = inspector.get_table_names()
+    logger.info("Tables in DB after create_all: %s", existing)
 
 
 def get_db():
