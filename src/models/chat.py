@@ -30,3 +30,8 @@ class CascadeResponse(BaseModel):
     """Структурированный результат: цели по подразделениям для дашборда."""
     goals_by_subdivision: List[dict]
     raw_output: Optional[str] = None
+
+
+class ExportGoalsRequest(BaseModel):
+    """Текст ответа LLM (например, последнее сообщение ассистента) для извлечения таблицы целей."""
+    content: Optional[str] = ""

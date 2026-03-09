@@ -1,7 +1,10 @@
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
 
 from .api.routes import (
     chat,
@@ -64,6 +67,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Чтобы при любой ошибке клиент получал JSON с detail, а не plain 'Internal Server Error'."""
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    logging.getLogger(__name__).exception("Unhandled: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc) or "Internal Server Error"},
+    )
 
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
 app.include_router(collections.router, prefix="/api/collections", tags=["collections"])

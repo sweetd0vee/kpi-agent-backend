@@ -2,13 +2,25 @@
 Чат с LLM и сценарий каскадирования (LangGraph).
 По ТЗ: промпт + вложения (id документов/файлов) → LLM; опционально граф каскадирования.
 """
+import logging
+from datetime import date
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse, Response
 
 from src.core.config import settings
-from src.models.chat import ChatRequest, ChatResponse, CascadeRequest, CascadeResponse
+from src.models.chat import (
+    CascadeRequest,
+    CascadeResponse,
+    ChatRequest,
+    ChatResponse,
+    ExportGoalsRequest,
+)
 from src.services.chat_context import get_documents_combined_text
+from src.services.goal_export import export_goals_xlsx_from_llm_response
 from src.services.llm import chat_completion
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -113,3 +125,39 @@ async def run_cascade(request: CascadeRequest):
         goals_by_subdivision=goals_by_subdivision,
         raw_output=result.get("raw_output"),
     )
+
+
+@router.post("/export-goals")
+async def export_goals(request: ExportGoalsRequest):
+    """
+    Извлечь из текста ответа LLM таблицу целей (РАЗДЕЛ 8) и вернуть xlsx.
+    Тело: { "content": "..." }. Ответ: файл цели_YYYYMMDD.xlsx или 404, если таблица не найдена.
+    """
+    try:
+        content = request.content if request.content is not None else ""
+        xlsx_bytes = export_goals_xlsx_from_llm_response(content)
+        if xlsx_bytes is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "detail": "В тексте не найдена таблица целей (РАЗДЕЛ 8 / CSV с разделителем «;»). Убедитесь, что модель вывела таблицу по шаблону."
+                },
+            )
+        if not isinstance(xlsx_bytes, bytes):
+            xlsx_bytes = bytes(xlsx_bytes) if xlsx_bytes else b""
+        # Имя файла только ASCII, чтобы не ломать кодировку заголовков (latin-1)
+        filename_ascii = f"goals_{date.today().strftime('%Y%m%d')}.xlsx"
+        return Response(
+            content=xlsx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename_ascii}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("export-goals: %s", e)
+        detail = str(e) if e else "Unknown error"
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Ошибка при формировании xlsx: {detail}"},
+        )

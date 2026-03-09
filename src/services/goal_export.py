@@ -7,11 +7,9 @@
 
 import io
 import re
-import uuid
-from typing import Any
+from typing import Dict, List, Optional
 
 import openpyxl
-from openpyxl.utils import get_column_letter
 
 # Заголовки листа «Цели» в xlsx (как в frontend exportLeaderGoalsExcel)
 EXCEL_HEADERS = [
@@ -37,28 +35,24 @@ EXCEL_HEADERS = [
     "Отчётный год",
 ]
 
-# Маппинг возможных заголовков CSV от LLM (нормализованные) на индекс в EXCEL_HEADERS (1-based: ФИО=0, № цели=1, ...)
-HEADER_ALIASES: dict[str, int] = {}
-for i, h in enumerate(EXCEL_HEADERS):
-    key = _norm(h)
-    HEADER_ALIASES[key] = i
-HEADER_ALIASES[_norm("№ цели")] = 1
-HEADER_ALIASES[_norm("Наименование КПЭ")] = 2
-HEADER_ALIASES[_norm("Тип цели")] = 3
-HEADER_ALIASES[_norm("Вид цели")] = 4
-HEADER_ALIASES[_norm("Единица измерения")] = 5
-HEADER_ALIASES[_norm("Ед. изм.")] = 5
-HEADER_ALIASES[_norm("Комментарии")] = 16
-HEADER_ALIASES[_norm("Методика расчета")] = 17
-HEADER_ALIASES[_norm("Методика расчёта")] = 17
-HEADER_ALIASES[_norm("Источник информации")] = 18
-
-
 def _norm(s: str) -> str:
-    return s.lower().strip().replace(" ", "").replace("ё", "е").replace("-", "")
+    return str(s).lower().strip().replace(" ", "").replace("ё", "е").replace("-", "")
 
 
-def _find_goals_table_block(content: str) -> str | None:
+# Маппинг возможных заголовков CSV от LLM (нормализованные) на индекс в EXCEL_HEADERS
+def _build_header_aliases() -> Dict[str, int]:
+    aliases: Dict[str, int] = {}
+    for i, h in enumerate(EXCEL_HEADERS):
+        aliases[_norm(h)] = i
+    aliases[_norm("Единица измерения")] = 5
+    aliases[_norm("Методика расчета")] = 17
+    return aliases
+
+
+HEADER_ALIASES = _build_header_aliases()
+
+
+def _find_goals_table_block(content: str) -> Optional[str]:
     """Найти в тексте блок с таблицей целей (РАЗДЕЛ 8 / ТАБЛИЦА ЦЕЛЕЙ)."""
     if not content or not content.strip():
         return None
@@ -98,18 +92,22 @@ def _find_goals_table_block(content: str) -> str | None:
             rest = parts[0]
         end_pos = len(rest)
     block = rest[:end_pos].strip()
-    return block if ";" in block else None
+    if ";" not in block:
+        return None
+    # Оставить только строки, похожие на CSV (с разделителем ;)
+    lines = [ln for ln in block.split("\n") if ";" in ln]
+    return "\n".join(lines) if lines else None
 
 
-def _parse_csv_block(block: str) -> list[list[str]]:
+def _parse_csv_block(block: str) -> List[List[str]]:
     """Парсинг CSV с разделителем «;». Кавычки учитываем (упрощённо)."""
-    rows: list[list[str]] = []
+    rows: List[List[str]] = []
     for line in block.split("\n"):
         line = line.strip()
         if not line:
             continue
         # Простой split по ; (если внутри кавычек — не разбивать; для LLM обычно без кавычек)
-        cells: list[str] = []
+        cells: List[str] = []
         current = ""
         in_quotes = False
         for i, c in enumerate(line):
@@ -121,31 +119,31 @@ def _parse_csv_block(block: str) -> list[list[str]]:
                 current = ""
             else:
                 current += c
-        cells.append(current.strip().strip('"'))
+        cells.append(str(current.strip().strip('"') or ""))
         rows.append(cells)
     return rows
 
 
-def _map_row_to_excel_row(cells: list[str], header_indices: list[int] | None) -> list[str]:
+def _map_row_to_excel_row(cells: List[str], header_indices: Optional[List[int]]) -> List[str]:
     """Преобразовать строку CSV в строку для Excel (20 колонок как EXCEL_HEADERS)."""
-    out: list[str] = [""] * len(EXCEL_HEADERS)
+    out: List[str] = [""] * len(EXCEL_HEADERS)
     if header_indices is not None:
         for col_idx, excel_idx in enumerate(header_indices):
             if 0 <= excel_idx < len(out) and col_idx < len(cells):
-                out[excel_idx] = cells[col_idx].strip() if col_idx < len(cells) else ""
+                out[excel_idx] = str(cells[col_idx]).strip() if col_idx < len(cells) else ""
     else:
         # По позиции: совпадение с типовым шаблоном (№ цели, Наименование, Тип, Вид, Ед.изм., Q1 вес, Q1 план, ...)
         for i, val in enumerate(cells):
             if i < len(out):
-                out[i] = val.strip()
+                out[i] = str(val).strip()
     return out
 
 
-def _infer_header_mapping(first_row: list[str]) -> list[int] | None:
+def _infer_header_mapping(first_row: List[str]) -> Optional[List[int]]:
     """По первой строке CSV определить маппинг колонок на EXCEL_HEADERS."""
-    mapping: list[int] = []
+    mapping: List[int] = []
     for cell in first_row:
-        key = _norm(cell)
+        key = _norm(str(cell))
         idx = HEADER_ALIASES.get(key)
         if idx is not None:
             mapping.append(idx)
@@ -157,12 +155,10 @@ def _infer_header_mapping(first_row: list[str]) -> list[int] | None:
                     found = i
                     break
             mapping.append(found if found >= 0 else -1)
-    if all(x >= 0 for x in mapping):
-        return mapping
-    return None
+    return mapping if any(x >= 0 for x in mapping) else None
 
 
-def extract_goals_table_from_content(content: str) -> list[list[str]]:
+def extract_goals_table_from_content(content: str) -> List[List[str]]:
     """
     Извлечь из текста ответа LLM таблицу целей и вернуть строки для Excel
     (каждая строка — список значений по колонкам EXCEL_HEADERS).
@@ -174,12 +170,12 @@ def extract_goals_table_from_content(content: str) -> list[list[str]]:
     if not rows:
         return []
     # Первая строка — заголовок?
-    header_indices: list[int] | None = None
+    header_indices: Optional[List[int]] = None
     data_start = 0
-    if rows and any(_norm(c).replace("%", "").replace(".", "") in ("цели", "кпэ", "наименование", "тип", "вид", "вес", "план", "квартал") for c in rows[0]):
+    if rows and any(_norm(str(c)).replace("%", "").replace(".", "") in ("цели", "кпэ", "наименование", "тип", "вид", "вес", "план", "квартал") for c in rows[0]):
         header_indices = _infer_header_mapping(rows[0])
         data_start = 1
-    result: list[list[str]] = []
+    result: List[List[str]] = []
     for row in rows[data_start:]:
         if not any(c.strip() for c in row):
             continue
@@ -187,7 +183,7 @@ def extract_goals_table_from_content(content: str) -> list[list[str]]:
     return result
 
 
-def build_goals_xlsx(rows: list[list[str]]) -> bytes:
+def build_goals_xlsx(rows: List[List[str]]) -> bytes:
     """Собрать xlsx с листом «Цели» и вернуть байты файла."""
     wb = openpyxl.Workbook(write_only=False)
     ws = wb.active
@@ -197,18 +193,26 @@ def build_goals_xlsx(rows: list[list[str]]) -> bytes:
         ws.title = "Цели"
     ws.append(EXCEL_HEADERS)
     for row in rows:
-        ws.append(row)
+        if not isinstance(row, (list, tuple)):
+            row = []
+        ws.append([str(c) for c in row])
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
     return buf.getvalue()
 
 
-def export_goals_xlsx_from_llm_response(content: str) -> bytes | None:
+def export_goals_xlsx_from_llm_response(content: str) -> Optional[bytes]:
     """
     По тексту ответа LLM извлечь таблицу целей и вернуть xlsx.
     Если таблица не найдена, возвращает None.
     """
+    if content is None:
+        content = ""
+    content = str(content)
+    # Ограничиваем размер, чтобы не перегружать память (примерно 2 МБ текста)
+    if len(content) > 2_000_000:
+        content = content[:2_000_000]
     rows = extract_goals_table_from_content(content)
     if not rows:
         return None
