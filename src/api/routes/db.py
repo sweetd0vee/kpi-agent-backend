@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.post("/init")
 def create_tables():
-    """Создать все таблицы (kpi, ppr, leaders, departments). Можно вызывать после старта, если БД была недоступна."""
+    """Создать все таблицы (kpi, ppr, leader_goals, leaders, departments). Можно вызывать после старта, если БД была недоступна."""
     init_db()
     with engine.connect() as conn:
         tables = inspect(conn).get_table_names()

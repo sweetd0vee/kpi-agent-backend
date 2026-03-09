@@ -10,8 +10,9 @@ from .api.routes import (
     db as db_router,
     departments,
     documents,
-    leaders,
     kpi,
+    leader_goals,
+    leaders,
     ppr,
     reference,
     settings as settings_router,
@@ -71,6 +72,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(kpi.router, prefix="/api/kpi", tags=["kpi"])
 app.include_router(ppr.router, prefix="/api/ppr", tags=["ppr"])
+app.include_router(leader_goals.router, prefix="/api/leader-goals", tags=["leader-goals"])
 app.include_router(reference.router, prefix="/api/reference", tags=["reference"])
 app.include_router(departments.router, prefix="/api/departments", tags=["departments"])
 app.include_router(leaders.router, prefix="/api/leaders", tags=["leaders"])
