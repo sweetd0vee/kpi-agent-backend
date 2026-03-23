@@ -74,3 +74,28 @@ class LeaderGoalRow(Base):
     method_desc: Mapped[str] = mapped_column(String, default="", nullable=False)
     source_info: Mapped[str] = mapped_column(String, default="", nullable=False)
     report_year: Mapped[str] = mapped_column(String, default="", nullable=False)
+
+
+class StrategyGoalRow(Base):
+    """Таблица стратегических целей (strategy goals)."""
+
+    __tablename__ = "strategy_goals"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    business_unit: Mapped[str] = mapped_column(String, default="", nullable=False)
+    segment: Mapped[str] = mapped_column(String, default="", nullable=False)
+    strategic_priority: Mapped[str] = mapped_column(String, default="", nullable=False)
+    goal_objective: Mapped[str] = mapped_column(String, default="", nullable=False)
+    initiative: Mapped[str] = mapped_column(String, default="", nullable=False)
+    initiative_type: Mapped[str] = mapped_column(String, default="", nullable=False)
+    responsible_person_owner: Mapped[str] = mapped_column(String, default="", nullable=False)
+    other_units_involved: Mapped[str] = mapped_column(String, default="", nullable=False)
+    budget: Mapped[str] = mapped_column(String, default="", nullable=False)
+    start_date: Mapped[str] = mapped_column(String, default="", nullable=False)
+    end_date: Mapped[str] = mapped_column(String, default="", nullable=False)
+    kpi: Mapped[str] = mapped_column(String, default="", nullable=False)
+    unit_of_measure: Mapped[str] = mapped_column(String, default="", nullable=False)
+    target_value_2025: Mapped[str] = mapped_column(String, default="", nullable=False)
+    target_value_2026: Mapped[str] = mapped_column(String, default="", nullable=False)
+    target_value_2027: Mapped[str] = mapped_column(String, default="", nullable=False)
+    category: Mapped[str] = mapped_column(String, default="", nullable=False)
