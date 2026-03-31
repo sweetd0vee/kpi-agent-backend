@@ -30,7 +30,7 @@ class Base(DeclarativeBase):
 
 def init_db() -> None:
     # Импорт всех моделей регистрирует таблицы в Base.metadata.
-    from .models import Department, KpiRow, Leader, LeaderGoalRow, PprRow, StrategyGoalRow  # noqa: F401
+    from .models import BoardGoalRow, Department, Leader, LeaderGoalRow, StrategyGoalRow  # noqa: F401
 
     table_names = list(Base.metadata.tables.keys())
     logger.info("Creating tables: %s", table_names)

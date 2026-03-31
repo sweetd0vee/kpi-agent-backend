@@ -7,16 +7,15 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from .api.routes import (
+    board_goals,
     chat,
     collections,
     dashboard,
     db as db_router,
     departments,
     documents,
-    kpi,
     leader_goals,
     leaders,
-    ppr,
     reference,
     settings as settings_router,
     strategy_goals,
@@ -86,8 +85,7 @@ app.include_router(collections.router, prefix="/api/collections", tags=["collect
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
-app.include_router(kpi.router, prefix="/api/kpi", tags=["kpi"])
-app.include_router(ppr.router, prefix="/api/ppr", tags=["ppr"])
+app.include_router(board_goals.router, prefix="/api/board-goals", tags=["board-goals"])
 app.include_router(leader_goals.router, prefix="/api/leader-goals", tags=["leader-goals"])
 app.include_router(strategy_goals.router, prefix="/api/strategy-goals", tags=["strategy-goals"])
 app.include_router(reference.router, prefix="/api/reference", tags=["reference"])

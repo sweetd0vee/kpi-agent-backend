@@ -34,6 +34,11 @@ class PprRow(GoalRowMixin, Base):
     __tablename__ = "ppr"
 
 
+class BoardGoalRow(GoalRowMixin, Base):
+    """Объединённая таблица целей правления (вместо отдельных kpi и ppr)."""
+    __tablename__ = "board_goals"
+
+
 class Leader(Base):
     __tablename__ = "leaders"
 
