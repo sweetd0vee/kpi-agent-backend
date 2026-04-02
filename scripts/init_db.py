@@ -1,5 +1,5 @@
 """
-Создание таблиц БД (kpi, ppr, leaders, departments).
+Создание таблиц БД (board_goals, leader_goals, strategy_goals, process_registry, staff, leaders).
 Запуск из каталога kpi-agent-backend:
   python scripts/init_db.py
 Или из любого места:
@@ -16,7 +16,7 @@ if _backend_root not in sys.path:
 def main():
     from src.db.database import init_db
     init_db()
-    print("Таблицы созданы: kpi, ppr, leaders, departments")
+    print("Таблицы созданы: board_goals, leader_goals, strategy_goals, process_registry, staff, leaders")
 
 if __name__ == "__main__":
     main()

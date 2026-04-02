@@ -1,6 +1,7 @@
 from typing import Optional
+from uuid import uuid4
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -10,10 +11,12 @@ class GoalRowMixin:
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     last_name: Mapped[str] = mapped_column(String, default="", nullable=False)
     leader_id: Mapped[Optional[str]] = mapped_column(
-        String(64),
+        Uuid(as_uuid=False),
         ForeignKey("leaders.id"),
         nullable=True,
     )
+    business_unit: Mapped[str] = mapped_column(String, default="", nullable=False)
+    department: Mapped[str] = mapped_column(String, default="", nullable=False)
     goal: Mapped[str] = mapped_column(String, default="", nullable=False)
     metric_goals: Mapped[str] = mapped_column(String, default="", nullable=False)
     weight_q: Mapped[str] = mapped_column(String, default="", nullable=False)
@@ -26,14 +29,6 @@ class GoalRowMixin:
     report_year: Mapped[str] = mapped_column(String, default="", nullable=False)
 
 
-class KpiRow(GoalRowMixin, Base):
-    __tablename__ = "kpi"
-
-
-class PprRow(GoalRowMixin, Base):
-    __tablename__ = "ppr"
-
-
 class BoardGoalRow(GoalRowMixin, Base):
     """Объединённая таблица целей правления (вместо отдельных kpi и ppr)."""
     __tablename__ = "board_goals"
@@ -42,15 +37,8 @@ class BoardGoalRow(GoalRowMixin, Base):
 class Leader(Base):
     __tablename__ = "leaders"
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
     full_name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-
-
-class Department(Base):
-    __tablename__ = "departments"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
 
 
 class LeaderGoalRow(Base):
@@ -103,4 +91,35 @@ class StrategyGoalRow(Base):
     target_value_2025: Mapped[str] = mapped_column(String, default="", nullable=False)
     target_value_2026: Mapped[str] = mapped_column(String, default="", nullable=False)
     target_value_2027: Mapped[str] = mapped_column(String, default="", nullable=False)
-    category: Mapped[str] = mapped_column(String, default="", nullable=False)
+
+
+class ProcessRegistryRow(Base):
+    """Реестр процессов (справочник)."""
+
+    __tablename__ = "process_registry"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    process_area: Mapped[str] = mapped_column(String, default="", nullable=False)  # Процессная область
+    process_code: Mapped[str] = mapped_column(String, default="", nullable=False)  # Код процесса
+    process_name: Mapped[str] = mapped_column(String, default="", nullable=False)  # Наименование процесса
+    process_owner: Mapped[str] = mapped_column(String, default="", nullable=False)  # Владелец процесса
+    owner_full_name_ref: Mapped[str] = mapped_column(
+        String, default="", nullable=False
+    )  # Справочно (ФИО владельца процесса)
+    business_unit: Mapped[str] = mapped_column(String, default="", nullable=False)  # Бизнес/блок
+    top_20: Mapped[str] = mapped_column(String, default="", nullable=False)  # ТОП 20
+
+
+class StaffRow(Base):
+    """Штат / оргструктура (справочник)."""
+
+    __tablename__ = "staff"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_structure_code: Mapped[str] = mapped_column(String, default="", nullable=False)  # Код оргструктуры
+    unit_name: Mapped[str] = mapped_column(String, default="", nullable=False)  # Наименование
+    head: Mapped[str] = mapped_column(String, default="", nullable=False)  # Руководитель
+    functional_block: Mapped[str] = mapped_column(String, default="", nullable=False)  # Функциональный блок
+    functional_block_curator: Mapped[str] = mapped_column(
+        String, default="", nullable=False
+    )  # Куратор функционального блока

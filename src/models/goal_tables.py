@@ -7,6 +7,8 @@ class GoalRow(BaseModel):
     id: str
     lastName: str = ""
     leaderId: Optional[str] = None
+    businessUnit: str = ""
+    department: str = ""
     goal: str = ""
     metricGoals: str = ""
     weightQ: str = ""

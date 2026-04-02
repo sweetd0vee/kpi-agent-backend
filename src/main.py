@@ -12,11 +12,12 @@ from .api.routes import (
     collections,
     dashboard,
     db as db_router,
-    departments,
     documents,
     leader_goals,
     leaders,
+    process_registry,
     reference,
+    staff,
     settings as settings_router,
     strategy_goals,
 )
@@ -24,8 +25,10 @@ from .core.config import settings
 from .db.database import init_db
 
 
-def _init_db_with_retry(max_attempts: int = 5, delay_sec: float = 2.0) -> None:
+def _init_db_with_retry(max_attempts: int = 3, delay_sec: float = 1.5) -> None:
+    """Пытается создать таблицы; при ошибке пробрасывает исключение (см. lifespan)."""
     import time
+
     last_exc = None
     for attempt in range(1, max_attempts + 1):
         try:
@@ -40,7 +43,15 @@ def _init_db_with_retry(max_attempts: int = 5, delay_sec: float = 2.0) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _init_db_with_retry()
+    try:
+        _init_db_with_retry()
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "БД недоступна при старте, таблицы не созданы: %s. "
+            "Сервис всё равно запущен — откройте /docs и /health. "
+            "Проверьте DATABASE_URL и что PostgreSQL запущен (см. README).",
+            e,
+        )
     # startup: MinIO — создать бакеты по типам документов при необходимости
     if settings.use_minio:
         try:
@@ -88,8 +99,9 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"]
 app.include_router(board_goals.router, prefix="/api/board-goals", tags=["board-goals"])
 app.include_router(leader_goals.router, prefix="/api/leader-goals", tags=["leader-goals"])
 app.include_router(strategy_goals.router, prefix="/api/strategy-goals", tags=["strategy-goals"])
+app.include_router(process_registry.router, prefix="/api/process-registry", tags=["process-registry"])
+app.include_router(staff.router, prefix="/api/staff", tags=["staff"])
 app.include_router(reference.router, prefix="/api/reference", tags=["reference"])
-app.include_router(departments.router, prefix="/api/departments", tags=["departments"])
 app.include_router(leaders.router, prefix="/api/leaders", tags=["leaders"])
 app.include_router(db_router.router, prefix="/api/db", tags=["db"])
 

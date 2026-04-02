@@ -57,7 +57,7 @@ npm run dev   # http://localhost:5173
 | **dashboard** | `GET /goals`, `GET /metrics` |
 
 ### База данных
-При старте приложения создаются **4 таблицы** в PostgreSQL: `kpi`, `ppr`, `leaders`, `departments`. Подключение задаётся через `DATABASE_URL` в `.env` (по умолчанию `postgresql+psycopg://postgres:postgres@localhost:5434/ai-kpi` при маппинге порта 5434 в docker-compose). Импорт таблицы КПЭ/ППР на фронте сохраняет данные в эти таблицы через `PUT /api/kpi` и `PUT /api/ppr`.
+При старте приложения создаются таблицы в PostgreSQL: `board_goals`, `leader_goals`, `strategy_goals`, `leaders`. Подключение задаётся через `DATABASE_URL` в `.env` (по умолчанию `postgresql+psycopg://postgres:postgres@localhost:5434/ai-kpi` при маппинге порта 5434 в docker-compose). Данные «Целей правления» сохраняются через `PUT /api/board-goals`.
 
 Если таблицы не появились (БД была недоступна при старте), создайте их вручную:
 - **Через API (удобнее всего):** запустите бэкенд, затем откройте http://localhost:8000/docs → раздел **db** → **POST /api/db/init** → Execute (или `curl -X POST http://localhost:8000/api/db/init`).
@@ -73,6 +73,8 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 - API: http://localhost:8000  
 - Swagger: http://localhost:8000/docs  
 - Health: http://localhost:8000/health  
+
+**Если `/docs` не загружается:** убедитесь, что в терминале видно `Uvicorn running on http://0.0.0.0:8000` (или `127.0.0.1:8000`). Если процесса нет — бэкенд не запущен или упал с ошибкой до старта. При недоступной PostgreSQL приложение теперь всё равно стартует, в логе будет предупреждение; поднимите БД (docker-compose с `db`, порт как в `DATABASE_URL`, по умолчанию **5434**) и выполните `POST /api/db/init` из `/docs` или `python scripts/init_db.py`.
 
 ### LLM модели: предобработка и финальная генерация
 

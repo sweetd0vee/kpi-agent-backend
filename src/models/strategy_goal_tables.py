@@ -23,7 +23,6 @@ class StrategyGoalRow(BaseModel):
     targetValue2025: str = ""
     targetValue2026: str = ""
     targetValue2027: str = ""
-    category: str = ""
 
 
 class StrategyGoalTable(BaseModel):

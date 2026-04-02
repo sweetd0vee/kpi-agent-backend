@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.post("/init")
 def create_tables():
-    """Создать все таблицы (kpi, ppr, leader_goals, strategy_goals, leaders, departments)."""
+    """Создать все таблицы (board_goals, leader_goals, strategy_goals, process_registry, staff, leaders)."""
     init_db()
     with engine.connect() as conn:
         tables = inspect(conn).get_table_names()
