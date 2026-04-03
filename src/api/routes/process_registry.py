@@ -16,9 +16,9 @@ def _db_to_schema(row: ProcessRegistryRowDb) -> ProcessRegistryRow:
         id=row.id,
         processArea=row.process_area or "",
         processCode=row.process_code or "",
-        processName=row.process_name or "",
+        process=row.process or "",
         processOwner=row.process_owner or "",
-        ownerFullNameRef=row.owner_full_name_ref or "",
+        leader=row.leader or "",
         businessUnit=row.business_unit or "",
         top20=row.top_20 or "",
     )
@@ -29,9 +29,9 @@ def _schema_to_db(row: ProcessRegistryRow) -> ProcessRegistryRowDb:
         id=row.id,
         process_area=row.processArea or "",
         process_code=row.processCode or "",
-        process_name=row.processName or "",
+        process=row.process or "",
         process_owner=row.processOwner or "",
-        owner_full_name_ref=row.ownerFullNameRef or "",
+        leader=row.leader or "",
         business_unit=row.businessUnit or "",
         top_20=row.top20 or "",
     )

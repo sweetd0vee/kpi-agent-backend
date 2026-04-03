@@ -10,7 +10,7 @@ class StaffRow(BaseModel):
     orgStructureCode: str = ""
     unitName: str = ""
     head: str = ""
-    functionalBlock: str = ""
+    businessUnit: str = ""
     functionalBlockCurator: str = ""
 
 

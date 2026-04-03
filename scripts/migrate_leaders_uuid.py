@@ -1,4 +1,11 @@
 """Drop old kpi/ppr tables and migrate leaders.id + board_goals.leader_id to UUID."""
+import os
+import sys
+
+_backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
+
 from sqlalchemy import text
 from src.db.database import engine
 

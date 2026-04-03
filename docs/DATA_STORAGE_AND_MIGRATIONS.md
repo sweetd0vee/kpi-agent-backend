@@ -59,7 +59,7 @@
 В проекте **нет встроенного Alembic/Flyway** как обязательной части CI. Исторически использовались:
 
 - **ручной SQL** в консоли `psql` или клиенте;
-- **одноразовые Python-скрипты** в `scripts/` (например, для перевода `leaders.id` и связанных колонок на UUID — см. `scripts/migrate_leaders_uuid.py` как образец подхода: снятие FK, `ALTER COLUMN`, возврат FK).
+- **одноразовые Python-скрипты** в `scripts/` (например, для перевода `leaders.id` и связанных колонок на UUID — см. `scripts/migrate_leaders_uuid.py` как образец подхода: снятие FK, `ALTER COLUMN`, возврат FK; переименование колонки `staff.functional_block` → `business_unit` — `scripts/migrate_staff_functional_block_to_business_unit.py`; переименование в `process_registry`: `process_name` → `process`, `owner_full_name_ref` → `leader` — `scripts/migrate_process_registry_process_and_leader.py`).
 
 Рекомендуемый порядок работ при изменении схемы:
 

@@ -9,9 +9,9 @@ class ProcessRegistryRow(BaseModel):
     id: str
     processArea: str = ""
     processCode: str = ""
-    processName: str = ""
+    process: str = ""
     processOwner: str = ""
-    ownerFullNameRef: str = ""
+    leader: str = ""
     businessUnit: str = ""
     top20: str = ""
 

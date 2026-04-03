@@ -101,11 +101,9 @@ class ProcessRegistryRow(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     process_area: Mapped[str] = mapped_column(String, default="", nullable=False)  # Процессная область
     process_code: Mapped[str] = mapped_column(String, default="", nullable=False)  # Код процесса
-    process_name: Mapped[str] = mapped_column(String, default="", nullable=False)  # Наименование процесса
+    process: Mapped[str] = mapped_column(String, default="", nullable=False)  # Наименование / процесс
     process_owner: Mapped[str] = mapped_column(String, default="", nullable=False)  # Владелец процесса
-    owner_full_name_ref: Mapped[str] = mapped_column(
-        String, default="", nullable=False
-    )  # Справочно (ФИО владельца процесса)
+    leader: Mapped[str] = mapped_column(String, default="", nullable=False)  # Руководитель / ФИО (справочно)
     business_unit: Mapped[str] = mapped_column(String, default="", nullable=False)  # Бизнес/блок
     top_20: Mapped[str] = mapped_column(String, default="", nullable=False)  # ТОП 20
 
@@ -119,7 +117,7 @@ class StaffRow(Base):
     org_structure_code: Mapped[str] = mapped_column(String, default="", nullable=False)  # Код оргструктуры
     unit_name: Mapped[str] = mapped_column(String, default="", nullable=False)  # Наименование
     head: Mapped[str] = mapped_column(String, default="", nullable=False)  # Руководитель
-    functional_block: Mapped[str] = mapped_column(String, default="", nullable=False)  # Функциональный блок
+    business_unit: Mapped[str] = mapped_column(String, default="", nullable=False)  # Бизнес/блок
     functional_block_curator: Mapped[str] = mapped_column(
         String, default="", nullable=False
     )  # Куратор функционального блока

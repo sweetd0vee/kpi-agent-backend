@@ -16,7 +16,7 @@ def _db_to_schema(row: StaffRowDb) -> StaffRow:
         orgStructureCode=row.org_structure_code or "",
         unitName=row.unit_name or "",
         head=row.head or "",
-        functionalBlock=row.functional_block or "",
+        businessUnit=row.business_unit or "",
         functionalBlockCurator=row.functional_block_curator or "",
     )
 
@@ -27,7 +27,7 @@ def _schema_to_db(row: StaffRow) -> StaffRowDb:
         org_structure_code=row.orgStructureCode or "",
         unit_name=row.unitName or "",
         head=row.head or "",
-        functional_block=row.functionalBlock or "",
+        business_unit=row.businessUnit or "",
         functional_block_curator=row.functionalBlockCurator or "",
     )
 
