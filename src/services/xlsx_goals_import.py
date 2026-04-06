@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import re
-import secrets
-import time
 from datetime import date, datetime
+from uuid import uuid4
 from io import BytesIO
 from typing import Any
 
@@ -17,8 +16,8 @@ from src.models.strategy_goal_tables import StrategyGoalRow
 
 
 def _generate_row_id() -> str:
-    """Как `generateId()` на фронте: `{ms}-{случайный суффикс}`."""
-    return f"{int(time.time() * 1000)}-{secrets.token_hex(5)}"
+    """UUID v4, в одном формате с `generateId()` на фронте."""
+    return str(uuid4())
 
 
 def _normalize_header_for_match(value: Any) -> str:
@@ -71,6 +70,7 @@ def _read_first_sheet_matrix(content: bytes) -> list[list[Any]]:
 BOARD_HEADER_TO_FIELD: dict[str, str] = {
     "ФИО": "lastName",
     "Бизнес/блок": "businessUnit",
+    "Бизнес юнит": "businessUnit",
     "Департамент": "department",
     "Подразделение": "department",
     "UUID руководителя": "leaderId",

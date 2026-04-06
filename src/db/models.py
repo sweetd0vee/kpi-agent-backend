@@ -8,7 +8,7 @@ from .database import Base
 
 
 class GoalRowMixin:
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
     last_name: Mapped[str] = mapped_column(String, default="", nullable=False)
     leader_id: Mapped[Optional[str]] = mapped_column(
         Uuid(as_uuid=False),
@@ -46,7 +46,7 @@ class LeaderGoalRow(Base):
 
     __tablename__ = "leader_goals"
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
     last_name: Mapped[str] = mapped_column(String, default="", nullable=False)
     goal_num: Mapped[str] = mapped_column(String, default="", nullable=False)
     name: Mapped[str] = mapped_column(String, default="", nullable=False)
@@ -74,7 +74,7 @@ class StrategyGoalRow(Base):
 
     __tablename__ = "strategy_goals"
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
     business_unit: Mapped[str] = mapped_column(String, default="", nullable=False)
     segment: Mapped[str] = mapped_column(String, default="", nullable=False)
     strategic_priority: Mapped[str] = mapped_column(String, default="", nullable=False)
@@ -98,7 +98,7 @@ class ProcessRegistryRow(Base):
 
     __tablename__ = "process_registry"
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
     process_area: Mapped[str] = mapped_column(String, default="", nullable=False)  # Процессная область
     process_code: Mapped[str] = mapped_column(String, default="", nullable=False)  # Код процесса
     process: Mapped[str] = mapped_column(String, default="", nullable=False)  # Наименование / процесс
@@ -113,7 +113,7 @@ class StaffRow(Base):
 
     __tablename__ = "staff"
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
     org_structure_code: Mapped[str] = mapped_column(String, default="", nullable=False)  # Код оргструктуры
     unit_name: Mapped[str] = mapped_column(String, default="", nullable=False)  # Наименование
     head: Mapped[str] = mapped_column(String, default="", nullable=False)  # Руководитель
