@@ -23,6 +23,9 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'staff' AND column_name = 'functional_block'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'staff' AND column_name = 'business_unit'
   ) THEN
     ALTER TABLE staff RENAME COLUMN functional_block TO business_unit;
   END IF;
