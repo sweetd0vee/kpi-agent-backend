@@ -140,7 +140,7 @@ async def export_goals(request: ExportGoalsRequest):
             return JSONResponse(
                 status_code=404,
                 content={
-                    "detail": "В тексте не найдена таблица целей (РАЗДЕЛ 8 / CSV с разделителем «;»). Убедитесь, что модель вывела таблицу по шаблону."
+                    "detail": "В тексте не найдена таблица целей (ожидаются «Раздел 8» и таблица: CSV с «;», Markdown |…|, TAB или запятые). Убедитесь, что модель вывела таблицу формы целей."
                 },
             )
         if not isinstance(xlsx_bytes, bytes):
