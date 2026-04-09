@@ -14,7 +14,6 @@ from .api.routes import (
     db as db_router,
     documents,
     leader_goals,
-    leaders,
     process_registry,
     reference,
     staff,
@@ -102,7 +101,6 @@ app.include_router(strategy_goals.router, prefix="/api/strategy-goals", tags=["s
 app.include_router(process_registry.router, prefix="/api/process-registry", tags=["process-registry"])
 app.include_router(staff.router, prefix="/api/staff", tags=["staff"])
 app.include_router(reference.router, prefix="/api/reference", tags=["reference"])
-app.include_router(leaders.router, prefix="/api/leaders", tags=["leaders"])
 app.include_router(db_router.router, prefix="/api/db", tags=["db"])
 
 

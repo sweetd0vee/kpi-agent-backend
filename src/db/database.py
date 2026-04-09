@@ -47,6 +47,39 @@ def _ensure_staff_business_unit_column(engine: Engine) -> None:
         logger.warning("staff: не удалось применить миграцию колонки business_unit: %s", e)
 
 
+def _migrate_drop_leaders_and_board_goals_leader_id(engine: Engine) -> None:
+    """Удалить таблицу leaders и колонку board_goals.leader_id (устаревшая схема)."""
+    try:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+        if engine.dialect.name == "postgresql":
+            with engine.begin() as conn:
+                if "board_goals" in table_names:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE board_goals DROP CONSTRAINT IF EXISTS board_goals_leader_id_fkey"
+                        )
+                    )
+                    cols = {c["name"] for c in inspector.get_columns("board_goals")}
+                    if "leader_id" in cols:
+                        conn.execute(text("ALTER TABLE board_goals DROP COLUMN leader_id"))
+                if "leaders" in table_names:
+                    conn.execute(text("DROP TABLE IF EXISTS leaders"))
+            logger.info("Схема: таблица leaders и колонка leader_id в board_goals убраны (PostgreSQL)")
+            return
+        if engine.dialect.name == "sqlite":
+            with engine.begin() as conn:
+                if "board_goals" in table_names:
+                    cols = {c["name"] for c in inspector.get_columns("board_goals")}
+                    if "leader_id" in cols:
+                        conn.execute(text("ALTER TABLE board_goals DROP COLUMN leader_id"))
+                if "leaders" in table_names:
+                    conn.execute(text("DROP TABLE IF EXISTS leaders"))
+            logger.info("Схема: таблица leaders и колонка leader_id в board_goals убраны (SQLite)")
+    except Exception as e:
+        logger.warning("Не удалось применить миграцию leaders/leader_id: %s", e)
+
+
 def _build_engine() -> Engine:
     connect_args = {}
     if settings.database_url.startswith("sqlite"):
@@ -70,7 +103,6 @@ def init_db() -> None:
     # Импорт всех моделей регистрирует таблицы в Base.metadata.
     from .models import (  # noqa: F401
         BoardGoalRow,
-        Leader,
         LeaderGoalRow,
         ProcessRegistryRow,
         StaffRow,
@@ -80,6 +112,7 @@ def init_db() -> None:
     table_names = list(Base.metadata.tables.keys())
     logger.info("Creating tables: %s", table_names)
     Base.metadata.create_all(bind=engine)
+    _migrate_drop_leaders_and_board_goals_leader_id(engine)
     _ensure_staff_business_unit_column(engine)
     with engine.connect() as conn:
         inspector = inspect(conn)

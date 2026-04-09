@@ -57,7 +57,7 @@ npm run dev   # http://localhost:5173
 | **dashboard** | `GET /goals`, `GET /metrics` |
 
 ### База данных
-При старте приложения создаются таблицы в PostgreSQL: `board_goals`, `leader_goals`, `strategy_goals`, `leaders`. Подключение задаётся через `DATABASE_URL` в `.env` (по умолчанию `postgresql+psycopg://postgres:postgres@localhost:5434/ai-kpi` при маппинге порта 5434 в docker-compose). Данные «Целей правления» сохраняются через `PUT /api/board-goals`.
+При старте приложения создаются таблицы в PostgreSQL: `board_goals`, `leader_goals`, `strategy_goals`, `process_registry`, `staff`. Подключение задаётся через `DATABASE_URL` в `.env` (по умолчанию `postgresql+psycopg://postgres:postgres@localhost:5434/ai-kpi` при маппинге порта 5434 в docker-compose). Данные «Целей правления» сохраняются через `PUT /api/board-goals`.
 
 Если таблицы не появились (БД была недоступна при старте), создайте их вручную:
 - **Через API (удобнее всего):** запустите бэкенд, затем откройте http://localhost:8000/docs → раздел **db** → **POST /api/db/init** → Execute (или `curl -X POST http://localhost:8000/api/db/init`).

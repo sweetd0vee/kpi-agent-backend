@@ -73,7 +73,6 @@ BOARD_HEADER_TO_FIELD: dict[str, str] = {
     "Бизнес юнит": "businessUnit",
     "Департамент": "department",
     "Подразделение": "department",
-    "UUID руководителя": "leaderId",
     "SCAI Цель": "goal",
     "Метрические цели": "metricGoals",
     "вес квартал": "weightQ",
@@ -165,7 +164,6 @@ def parse_board_goals_xlsx(content: bytes) -> list[GoalRow]:
     for raw in matrix[1:]:
         row: dict[str, str] = {
             "lastName": "",
-            "leaderId": "",
             "businessUnit": "",
             "department": "",
             "goal": "",
@@ -184,13 +182,10 @@ def parse_board_goals_xlsx(content: bytes) -> list[GoalRow]:
             row[field] = _normalize_cell(cell)
         if not any(str(v).strip() for v in row.values()):
             continue
-        leader_raw = (row.get("leaderId") or "").strip()
-        lid = leader_raw if leader_raw else None
         out.append(
             GoalRow(
                 id=_generate_row_id(),
                 lastName=row["lastName"],
-                leaderId=lid,
                 businessUnit=row["businessUnit"],
                 department=row["department"],
                 goal=row["goal"],

@@ -1,7 +1,4 @@
-from typing import Optional
-from uuid import uuid4
-
-from sqlalchemy import ForeignKey, String, Uuid
+from sqlalchemy import String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -10,11 +7,6 @@ from .database import Base
 class GoalRowMixin:
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
     last_name: Mapped[str] = mapped_column(String, default="", nullable=False)
-    leader_id: Mapped[Optional[str]] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("leaders.id"),
-        nullable=True,
-    )
     business_unit: Mapped[str] = mapped_column(String, default="", nullable=False)
     department: Mapped[str] = mapped_column(String, default="", nullable=False)
     goal: Mapped[str] = mapped_column(String, default="", nullable=False)
@@ -32,13 +24,6 @@ class GoalRowMixin:
 class BoardGoalRow(GoalRowMixin, Base):
     """Объединённая таблица целей правления (вместо отдельных kpi и ppr)."""
     __tablename__ = "board_goals"
-
-
-class Leader(Base):
-    __tablename__ = "leaders"
-
-    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    full_name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
 
 
 class LeaderGoalRow(Base):
