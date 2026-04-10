@@ -11,25 +11,31 @@ from src.services.xlsx_goals_import import parse_strategy_goals_xlsx
 router = APIRouter()
 
 
+def _text(v: object) -> str:
+    if v is None:
+        return ""
+    return str(v)
+
+
 def _db_to_schema(row: StrategyGoalRowDb) -> StrategyGoalRow:
     return StrategyGoalRow(
-        id=row.id,
-        businessUnit=row.business_unit or "",
-        segment=row.segment or "",
-        strategicPriority=row.strategic_priority or "",
-        goalObjective=row.goal_objective or "",
-        initiative=row.initiative or "",
-        initiativeType=row.initiative_type or "",
-        responsiblePersonOwner=row.responsible_person_owner or "",
-        otherUnitsInvolved=row.other_units_involved or "",
-        budget=row.budget or "",
-        startDate=row.start_date or "",
-        endDate=row.end_date or "",
-        kpi=row.kpi or "",
-        unitOfMeasure=row.unit_of_measure or "",
-        targetValue2025=row.target_value_2025 or "",
-        targetValue2026=row.target_value_2026 or "",
-        targetValue2027=row.target_value_2027 or "",
+        id=_text(getattr(row, "id", None)),
+        businessUnit=_text(getattr(row, "business_unit", None)),
+        segment=_text(getattr(row, "segment", None)),
+        strategicPriority=_text(getattr(row, "strategic_priority", None)),
+        goalObjective=_text(getattr(row, "goal_objective", None)),
+        initiative=_text(getattr(row, "initiative", None)),
+        initiativeType=_text(getattr(row, "initiative_type", None)),
+        responsiblePersonOwner=_text(getattr(row, "responsible_person_owner", None)),
+        otherUnitsInvolved=_text(getattr(row, "other_units_involved", None)),
+        budget=_text(getattr(row, "budget", None)),
+        startDate=_text(getattr(row, "start_date", None)),
+        endDate=_text(getattr(row, "end_date", None)),
+        kpi=_text(getattr(row, "kpi", None)),
+        unitOfMeasure=_text(getattr(row, "unit_of_measure", None)),
+        targetValue2025=_text(getattr(row, "target_value_2025", None)),
+        targetValue2026=_text(getattr(row, "target_value_2026", None)),
+        targetValue2027=_text(getattr(row, "target_value_2027", None)),
     )
 
 

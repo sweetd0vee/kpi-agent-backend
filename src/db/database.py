@@ -80,6 +80,64 @@ def _migrate_drop_leaders_and_board_goals_leader_id(engine: Engine) -> None:
         logger.warning("Не удалось применить миграцию leaders/leader_id: %s", e)
 
 
+def _ensure_strategy_goals_schema(engine: Engine) -> None:
+    """Добавить недостающие колонки в strategy_goals (старые БД до полей target_value_* и т.п.)."""
+    try:
+        inspector = inspect(engine)
+        tables = set(inspector.get_table_names())
+        if "strategy_goals" not in tables:
+            return
+        cols = {c["name"] for c in inspector.get_columns("strategy_goals")}
+        expected = {
+            "business_unit",
+            "segment",
+            "strategic_priority",
+            "goal_objective",
+            "initiative",
+            "initiative_type",
+            "responsible_person_owner",
+            "other_units_involved",
+            "budget",
+            "start_date",
+            "end_date",
+            "kpi",
+            "unit_of_measure",
+            "target_value_2025",
+            "target_value_2026",
+            "target_value_2027",
+        }
+        missing = sorted(expected - cols)
+        if engine.dialect.name == "postgresql":
+            with engine.begin() as conn:
+                if "category" in cols:
+                    conn.execute(text("ALTER TABLE strategy_goals DROP COLUMN IF EXISTS category"))
+                for col in missing:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE strategy_goals ADD COLUMN IF NOT EXISTS {col} VARCHAR NOT NULL DEFAULT ''"
+                        )
+                    )
+            if missing or "category" in cols:
+                logger.info(
+                    "strategy_goals: выровнена схема (PostgreSQL), добавлено колонок: %s",
+                    len(missing),
+                )
+            return
+        if engine.dialect.name == "sqlite":
+            with engine.begin() as conn:
+                for col in missing:
+                    conn.execute(
+                        text(f"ALTER TABLE strategy_goals ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+                    )
+            if missing:
+                logger.info(
+                    "strategy_goals: добавлены колонки (SQLite): %s",
+                    ", ".join(missing),
+                )
+    except Exception as e:
+        logger.warning("strategy_goals: не удалось выровнять схему: %s", e)
+
+
 def _build_engine() -> Engine:
     connect_args = {}
     if settings.database_url.startswith("sqlite"):
@@ -114,6 +172,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_drop_leaders_and_board_goals_leader_id(engine)
     _ensure_staff_business_unit_column(engine)
+    _ensure_strategy_goals_schema(engine)
     with engine.connect() as conn:
         inspector = inspect(conn)
         existing = inspector.get_table_names()
