@@ -62,12 +62,12 @@ async def get_template_documents():
 
 @router.post("/template-documents/upload", response_model=DocumentMeta)
 async def upload_template_document(
-    document_type: str = Query(..., description="business_plan_checklist, strategy_checklist или reglament_checklist"),
+    document_type: str = Query(..., description="strategy_checklist или reglament_checklist"),
     file: UploadFile = File(...),
 ):
     """
     Загрузить или заменить шаблонный документ одного из типов.
-    При USE_MINIO=true файл сохраняется в MinIO в бакет по типу (business-plan, strategy, regulation).
+    При USE_MINIO=true файл сохраняется в MinIO в бакет по типу (strategy, regulation).
     Шаблоны загружаются один раз и автоматически копируются в каждую новую коллекцию и используются в контексте для LLM.
     """
     if document_type not in TEMPLATE_DOCUMENT_TYPES:

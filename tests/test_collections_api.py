@@ -16,7 +16,7 @@ def test_create_update_context_and_delete_collection(client):
 
     upload = client.post(
         "/api/documents/upload",
-        params={"document_type": "business_plan_checklist", "collection_id": collection["id"]},
+        params={"document_type": "reglament_checklist", "collection_id": collection["id"]},
         files={"file": ("plan.txt", b"hello world", "text/plain")},
     )
     assert upload.status_code == 200

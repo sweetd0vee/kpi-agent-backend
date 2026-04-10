@@ -15,12 +15,12 @@ from src.models.knowledge import DocumentType
 from src.services import file_storage
 
 
-# Коллекция-шаблон: документы, загружаемые один раз в настройках (Бизнес-план, Стратегия, Регламент).
+# Коллекция-шаблон: документы, загружаемые один раз в настройках (Стратегия, Регламент).
 # При создании новой коллекции они автоматически копируются в неё.
 TEMPLATE_COLLECTION_ID = "__template__"
 
 # Типы документов, хранящиеся как шаблон (загружаются на вкладке «Настройки»).
-TEMPLATE_DOCUMENT_TYPES = ("business_plan_checklist", "strategy_checklist", "reglament_checklist")
+TEMPLATE_DOCUMENT_TYPES = ("strategy_checklist", "reglament_checklist")
 
 
 def get_upload_root() -> Path:
