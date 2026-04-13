@@ -1,4 +1,4 @@
-from sqlalchemy import String, Uuid
+from sqlalchemy import Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -106,3 +106,41 @@ class StaffRow(Base):
     functional_block_curator: Mapped[str] = mapped_column(
         String, default="", nullable=False
     )  # Куратор функционального блока
+
+
+class CascadeRun(Base):
+    """История запусков табличного каскадирования."""
+
+    __tablename__ = "cascade_runs"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    created_at: Mapped[str] = mapped_column(String, default="", nullable=False)
+    status: Mapped[str] = mapped_column(String, default="success", nullable=False)
+    report_year: Mapped[str] = mapped_column(String, default="", nullable=False)
+    managers_filter: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    total_managers: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_deputies: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_items: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    unmatched_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    unmatched_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+
+
+class CascadeRunItem(Base):
+    """Назначения KPI в рамках конкретного запуска каскада."""
+
+    __tablename__ = "cascade_run_items"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    manager_name: Mapped[str] = mapped_column(String, default="", nullable=False)
+    deputy_name: Mapped[str] = mapped_column(String, default="", nullable=False)
+    source_type: Mapped[str] = mapped_column(String, default="", nullable=False)
+    source_row_id: Mapped[str] = mapped_column(String, default="", nullable=False)
+    source_goal_title: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    source_metric: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    business_unit: Mapped[str] = mapped_column(String, default="", nullable=False)
+    department: Mapped[str] = mapped_column(String, default="", nullable=False)
+    report_year: Mapped[str] = mapped_column(String, default="", nullable=False)
+    trace_rule: Mapped[str] = mapped_column(String, default="", nullable=False)
+    confidence: Mapped[str] = mapped_column(String, default="", nullable=False)

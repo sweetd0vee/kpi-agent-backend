@@ -138,6 +138,60 @@ def _ensure_strategy_goals_schema(engine: Engine) -> None:
         logger.warning("strategy_goals: не удалось выровнять схему: %s", e)
 
 
+def _ensure_cascade_schema(engine: Engine) -> None:
+    """Добавить недостающие колонки в таблицы истории каскадирования."""
+    try:
+        inspector = inspect(engine)
+        tables = set(inspector.get_table_names())
+        expected: dict[str, dict[str, str]] = {
+            "cascade_runs": {
+                "created_at": "VARCHAR NOT NULL DEFAULT ''",
+                "status": "VARCHAR NOT NULL DEFAULT 'success'",
+                "report_year": "VARCHAR NOT NULL DEFAULT ''",
+                "managers_filter": "TEXT NOT NULL DEFAULT '[]'",
+                "total_managers": "INTEGER NOT NULL DEFAULT 0",
+                "total_deputies": "INTEGER NOT NULL DEFAULT 0",
+                "total_items": "INTEGER NOT NULL DEFAULT 0",
+                "unmatched_count": "INTEGER NOT NULL DEFAULT 0",
+                "warnings_json": "TEXT NOT NULL DEFAULT '[]'",
+                "unmatched_json": "TEXT NOT NULL DEFAULT '[]'",
+            },
+            "cascade_run_items": {
+                "run_id": "VARCHAR NOT NULL DEFAULT ''",
+                "manager_name": "VARCHAR NOT NULL DEFAULT ''",
+                "deputy_name": "VARCHAR NOT NULL DEFAULT ''",
+                "source_type": "VARCHAR NOT NULL DEFAULT ''",
+                "source_row_id": "VARCHAR NOT NULL DEFAULT ''",
+                "source_goal_title": "TEXT NOT NULL DEFAULT ''",
+                "source_metric": "TEXT NOT NULL DEFAULT ''",
+                "business_unit": "VARCHAR NOT NULL DEFAULT ''",
+                "department": "VARCHAR NOT NULL DEFAULT ''",
+                "report_year": "VARCHAR NOT NULL DEFAULT ''",
+                "trace_rule": "VARCHAR NOT NULL DEFAULT ''",
+                "confidence": "VARCHAR NOT NULL DEFAULT ''",
+            },
+        }
+
+        for table_name, columns in expected.items():
+            if table_name not in tables:
+                continue
+            existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+            missing = [(name, ddl) for name, ddl in columns.items() if name not in existing_cols]
+            if not missing:
+                continue
+            with engine.begin() as conn:
+                for col_name, ddl in missing:
+                    if engine.dialect.name == "postgresql":
+                        conn.execute(
+                            text(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {col_name} {ddl}")
+                        )
+                    elif engine.dialect.name == "sqlite":
+                        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {ddl}"))
+            logger.info("%s: добавлены колонки: %s", table_name, ", ".join(name for name, _ in missing))
+    except Exception as e:
+        logger.warning("cascade tables: не удалось выровнять схему: %s", e)
+
+
 def _build_engine() -> Engine:
     connect_args = {}
     if settings.database_url.startswith("sqlite"):
@@ -161,6 +215,8 @@ def init_db() -> None:
     # Импорт всех моделей регистрирует таблицы в Base.metadata.
     from .models import (  # noqa: F401
         BoardGoalRow,
+        CascadeRun,
+        CascadeRunItem,
         LeaderGoalRow,
         ProcessRegistryRow,
         StaffRow,
@@ -173,6 +229,7 @@ def init_db() -> None:
     _migrate_drop_leaders_and_board_goals_leader_id(engine)
     _ensure_staff_business_unit_column(engine)
     _ensure_strategy_goals_schema(engine)
+    _ensure_cascade_schema(engine)
     with engine.connect() as conn:
         inspector = inspect(conn)
         existing = inspector.get_table_names()

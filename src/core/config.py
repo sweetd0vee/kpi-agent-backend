@@ -32,9 +32,15 @@ class Settings(BaseSettings):
     # Для каскада: использовать Ollama вместо Open Web UI / OpenAI.
     use_ollama_for_cascade: bool = False
     # Модель Ollama для каскада (сильная). Должна быть установлена: ollama pull <model>.
-    ollama_cascade_model: str = "qwen2.5:32b"
+    ollama_cascade_model: str = "qwen:32b"
     # Таймаут запроса к Ollama при каскаде (секунды).
     ollama_cascade_timeout: float = 300.0
+    # Этап 2: включить LLM-оценку для табличного каскадирования.
+    enable_cascade_llm: bool = False
+    # Модель Ollama для judge-оценки пар KPI в табличном каскаде.
+    cascade_llm_judge_model: str = "qwen3:8b"
+    # Таймаут judge-запроса в секундах.
+    cascade_llm_timeout_sec: float = 120.0
     upload_dir: str = "uploads"  # каталог для загруженных файлов базы знаний
     # Локальный запуск: порт 5434 при маппинге 5434:5432 в docker-compose; в Docker задайте DATABASE_URL с хостом db
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5434/ai-kpi"

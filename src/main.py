@@ -8,6 +8,7 @@ from starlette.requests import Request
 
 from .api.routes import (
     board_goals,
+    cascade,
     chat,
     collections,
     dashboard,
@@ -94,6 +95,7 @@ app.include_router(documents.router, prefix="/api/documents", tags=["documents"]
 app.include_router(collections.router, prefix="/api/collections", tags=["collections"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(cascade.router, prefix="/api/cascade", tags=["cascade"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(board_goals.router, prefix="/api/board-goals", tags=["board-goals"])
 app.include_router(leader_goals.router, prefix="/api/leader-goals", tags=["leader-goals"])
