@@ -15,6 +15,7 @@ from src.db.models import (
     CascadeRun,
     CascadeRunItem,
     LeaderGoalRow,
+    ProcessRegistryRow,
     StaffRow,
     StrategyGoalRow,
 )
@@ -26,6 +27,7 @@ class CascadeSnapshot:
     leader_rows: list[LeaderGoalRow]
     strategy_rows: list[StrategyGoalRow]
     staff_rows: list[StaffRow]
+    process_rows: list[ProcessRegistryRow]
 
 
 class CascadeRepository:
@@ -44,6 +46,7 @@ class CascadeRepository:
             leader_rows=leader_q.order_by(LeaderGoalRow.id).all(),
             strategy_rows=self.db.query(StrategyGoalRow).order_by(StrategyGoalRow.id).all(),
             staff_rows=self.db.query(StaffRow).order_by(StaffRow.id).all(),
+            process_rows=self.db.query(ProcessRegistryRow).order_by(ProcessRegistryRow.id).all(),
         )
 
     def save_run(

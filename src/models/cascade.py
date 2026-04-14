@@ -9,7 +9,7 @@ class CascadeRunRequest(BaseModel):
     reportYear: Optional[str] = ""
     managers: List[str] = Field(default_factory=list)
     persist: bool = True
-    useLlm: bool = False
+    useLlm: bool = True
     maxItemsPerDeputy: int = 25
 
 

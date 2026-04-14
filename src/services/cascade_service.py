@@ -1,13 +1,20 @@
-"""Детерминированное каскадирование KPI между manager -> deputy."""
+"""Каскадирование KPI между manager -> deputy с фильтрацией по процессам."""
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Optional
 
+from src.core.config import settings
+from src.services.cascade_llm import CascadeLlmAdapter
 from src.services.cascade_repository import CascadeSnapshot
+
+logger = logging.getLogger(__name__)
 
 
 def norm_text(value: object) -> str:
@@ -50,6 +57,8 @@ class CascadeComputationResult:
 class CascadeService:
     def __init__(self, snapshot: CascadeSnapshot) -> None:
         self.snapshot = snapshot
+        self.llm = CascadeLlmAdapter()
+        self._relevance_cache: dict[str, dict[str, object]] = {}
 
     def run(
         self,
@@ -57,12 +66,22 @@ class CascadeService:
         report_year: str = "",
         managers: Optional[list[str]] = None,
         max_items_per_deputy: int = 25,
+        use_llm: bool = False,
     ) -> CascadeComputationResult:
+        started_at = time.perf_counter()
         manager_to_deputies = self._build_manager_tree()
+        person_to_processes = self._build_manager_processes()
         selected = [m.strip() for m in (managers or []) if m and m.strip()]
         if not selected:
             selected = sorted(manager_to_deputies.keys())
         max_per_deputy = max(1, min(max_items_per_deputy, 200))
+        logger.info(
+            "Cascade run started: managers=%s use_llm=%s report_year=%s max_per_deputy=%s",
+            len(selected),
+            use_llm,
+            report_year or "-",
+            max_per_deputy,
+        )
 
         all_deputies: set[str] = set()
         items: list[dict[str, object]] = []
@@ -70,8 +89,10 @@ class CascadeService:
         warnings: list[str] = []
 
         for manager_name in selected:
+            manager_started = time.perf_counter()
             deputies = sorted(manager_to_deputies.get(manager_name, set()))
             if not deputies:
+                logger.info("Manager '%s': no deputies found in staff", manager_name)
                 unmatched.append(
                     {
                         "managerName": manager_name,
@@ -82,6 +103,7 @@ class CascadeService:
                 continue
             source_goals = self._build_source_goals_for_manager(manager_name, report_year=report_year)
             if not source_goals:
+                logger.info("Manager '%s': no source goals found", manager_name)
                 unmatched.append(
                     {
                         "managerName": manager_name,
@@ -90,10 +112,60 @@ class CascadeService:
                     }
                 )
                 continue
+            manager_items_before = len(items)
+            logger.info(
+                "Manager '%s': deputies=%s source_goals=%s",
+                manager_name,
+                len(deputies),
+                len(source_goals),
+            )
 
             for deputy_name in deputies:
                 all_deputies.add(deputy_name)
-                for source in source_goals[:max_per_deputy]:
+                deputy_processes = self._get_processes_for_person(person_to_processes, deputy_name)
+                if not deputy_processes:
+                    logger.info(
+                        "Manager '%s' deputy '%s': no processes in registry",
+                        manager_name,
+                        deputy_name,
+                    )
+                    unmatched.append(
+                        {
+                            "managerName": manager_name,
+                            "reason": f"Для заместителя '{deputy_name}' не найдены процессы в реестре процессов.",
+                            "reportYear": report_year,
+                        }
+                    )
+                    continue
+                deputy_goals = self._filter_goals_by_process_relevance(
+                    subject_name=deputy_name,
+                    process_names=deputy_processes,
+                    source_goals=source_goals,
+                    use_llm=use_llm,
+                )
+                if not deputy_goals:
+                    logger.info(
+                        "Manager '%s' deputy '%s': no relevant goals after filtering (processes=%s)",
+                        manager_name,
+                        deputy_name,
+                        len(deputy_processes),
+                    )
+                    unmatched.append(
+                        {
+                            "managerName": manager_name,
+                            "reason": f"Для заместителя '{deputy_name}' не найдено релевантных целей по его процессам.",
+                            "reportYear": report_year,
+                        }
+                    )
+                    continue
+                logger.info(
+                    "Manager '%s' deputy '%s': relevant_goals=%s (processes=%s)",
+                    manager_name,
+                    deputy_name,
+                    len(deputy_goals),
+                    len(deputy_processes),
+                )
+                for source in deputy_goals[:max_per_deputy]:
                     items.append(
                         {
                             "id": str(uuid.uuid4()),
@@ -107,12 +179,30 @@ class CascadeService:
                             "department": source["department"],
                             "reportYear": source["reportYear"] or report_year,
                             "traceRule": source["traceRule"],
-                            "confidence": None,
+                            "confidence": (
+                                float(source["confidence"])
+                                if source.get("confidence") not in (None, "")
+                                else None
+                            ),
                         }
                     )
+            logger.info(
+                "Manager '%s': finished in %.2fs, items_added=%s",
+                manager_name,
+                time.perf_counter() - manager_started,
+                len(items) - manager_items_before,
+            )
 
         if not items:
             warnings.append("Каскадирование не дало назначений. Проверьте заполненность staff и целей.")
+        logger.info(
+            "Cascade run finished in %.2fs: items=%s unmatched=%s deputies=%s llm_cache_size=%s",
+            time.perf_counter() - started_at,
+            len(items),
+            len(unmatched),
+            len(all_deputies),
+            len(self._relevance_cache),
+        )
 
         return CascadeComputationResult(
             report_year=report_year,
@@ -135,6 +225,178 @@ class CascadeService:
                 continue
             tree.setdefault(manager, set()).add(deputy)
         return tree
+
+    def _build_manager_processes(self) -> dict[str, list[str]]:
+        processes: dict[str, list[str]] = {}
+        for row in self.snapshot.process_rows:
+            manager_name = str(row.leader or "").strip()
+            process_name = str(row.process or "").strip()
+            if not manager_name or not process_name:
+                continue
+            existing_key = next((key for key in processes if names_match(key, manager_name)), manager_name)
+            processes.setdefault(existing_key, [])
+            if process_name not in processes[existing_key]:
+                processes[existing_key].append(process_name)
+        return processes
+
+    def _get_processes_for_person(
+        self,
+        person_to_processes: dict[str, list[str]],
+        person_name: str,
+    ) -> list[str]:
+        direct = person_to_processes.get(person_name)
+        if direct:
+            return direct
+        for key, values in person_to_processes.items():
+            if names_match(key, person_name):
+                return values
+        return []
+
+    def _filter_goals_by_process_relevance(
+        self,
+        *,
+        subject_name: str,
+        process_names: list[str],
+        source_goals: list[dict[str, str]],
+        use_llm: bool,
+    ) -> list[dict[str, str]]:
+        filter_started = time.perf_counter()
+        scored_candidates: list[tuple[float, dict[str, str]]] = []
+        for source in source_goals:
+            goal_title = str(source.get("sourceGoalTitle") or "")
+            goal_metric = str(source.get("sourceMetric") or "")
+            goal_text = f"{goal_title} {goal_metric}".strip()
+            if not goal_text:
+                continue
+            score = self._keyword_relevance_score(goal_text, process_names)
+            if score <= 0:
+                continue
+            scored_candidates.append((score, source))
+
+        if not scored_candidates:
+            logger.info(
+                "Relevance filter '%s': no keyword candidates (source_goals=%s, processes=%s)",
+                subject_name,
+                len(source_goals),
+                len(process_names),
+            )
+            return []
+
+        scored_candidates.sort(key=lambda x: x[0], reverse=True)
+        llm_limit = max(1, int(getattr(settings, "cascade_llm_max_candidates_per_deputy", 15)))
+        llm_calls = 0
+        llm_cache_hits = 0
+
+        filtered: list[dict[str, str]] = []
+        for idx, (_score, source) in enumerate(scored_candidates):
+            goal_title = str(source.get("sourceGoalTitle") or "")
+            goal_metric = str(source.get("sourceMetric") or "")
+            goal_text = f"{goal_title} {goal_metric}".strip()
+
+            relevant = True  # keyword prefilter уже выполнен выше
+            llm_reason = ""
+            llm_confidence: Optional[float] = None
+            if use_llm and idx < llm_limit:
+                cache_key = self._build_relevance_cache_key(
+                    subject_name=subject_name,
+                    process_names=process_names,
+                    goal_title=goal_title,
+                    goal_metric=goal_metric,
+                )
+                llm_result = self._relevance_cache.get(cache_key)
+                if llm_result is None:
+                    llm_calls += 1
+                    llm_result = self.llm.assess_goal_relevance(
+                        subject_name=subject_name,
+                        process_names=process_names,
+                        goal_title=goal_title,
+                        goal_metric=goal_metric,
+                        force=True,
+                    )
+                    if llm_result is not None:
+                        self._relevance_cache[cache_key] = llm_result
+                else:
+                    llm_cache_hits += 1
+                if llm_result is not None:
+                    relevant = bool(llm_result.get("relevant"))
+                    llm_reason = str(llm_result.get("reason") or "").strip()
+                    confidence_raw = llm_result.get("confidence")
+                    try:
+                        llm_confidence = float(confidence_raw) if confidence_raw is not None else None
+                    except (TypeError, ValueError):
+                        llm_confidence = None
+            if not relevant:
+                continue
+
+            trace = source.get("traceRule") or ""
+            if use_llm:
+                if idx < llm_limit:
+                    trace = f"{trace}; relevance: llm+process_registry({subject_name})"
+                    if llm_reason:
+                        trace = f"{trace}; reason: {llm_reason}"
+                else:
+                    trace = f"{trace}; relevance: keyword+process_registry({subject_name}); llm: skipped_by_limit"
+            else:
+                trace = f"{trace}; relevance: keyword+process_registry({subject_name})"
+
+            item = {**source, "traceRule": trace}
+            if llm_confidence is not None:
+                item["confidence"] = str(round(llm_confidence, 4))
+            filtered.append(item)
+        logger.info(
+            "Relevance filter '%s': source=%s keyword_candidates=%s filtered=%s llm_calls=%s llm_cache_hits=%s llm_limit=%s elapsed=%.2fs",
+            subject_name,
+            len(source_goals),
+            len(scored_candidates),
+            len(filtered),
+            llm_calls,
+            llm_cache_hits,
+            llm_limit,
+            time.perf_counter() - filter_started,
+        )
+        return filtered
+
+    def _is_goal_relevant_by_keywords(self, goal_text: str, process_names: list[str]) -> bool:
+        return self._keyword_relevance_score(goal_text, process_names) > 0
+
+    def _keyword_relevance_score(self, goal_text: str, process_names: list[str]) -> float:
+        goal_tokens = self._tokenize(goal_text)
+        if not goal_tokens:
+            return 0.0
+        best_score = 0.0
+        for process_name in process_names:
+            process_tokens = self._tokenize(process_name)
+            if not process_tokens:
+                continue
+            overlap = goal_tokens.intersection(process_tokens)
+            if not overlap:
+                continue
+            score = len(overlap) / max(1, len(process_tokens))
+            if score > best_score:
+                best_score = score
+        return best_score
+
+    def _build_relevance_cache_key(
+        self,
+        *,
+        subject_name: str,
+        process_names: list[str],
+        goal_title: str,
+        goal_metric: str,
+    ) -> str:
+        normalized = "|".join(
+            [
+                norm_text(subject_name),
+                ",".join(sorted(norm_text(p) for p in process_names)),
+                norm_text(goal_title),
+                norm_text(goal_metric),
+            ]
+        )
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    def _tokenize(self, text: str) -> set[str]:
+        parts = re.split(r"[^a-zA-Zа-яА-Я0-9]+", norm_text(text))
+        return {part for part in parts if len(part) >= 3}
 
     def _build_source_goals_for_manager(self, manager_name: str, report_year: str) -> list[dict[str, str]]:
         out: list[dict[str, str]] = []

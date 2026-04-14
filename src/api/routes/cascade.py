@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +23,7 @@ from src.services.cascade_repository import CascadeRepository
 from src.services.cascade_service import CascadeService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _make_summary(
@@ -50,6 +53,15 @@ def _make_summary(
 
 @router.post("/run", response_model=CascadeRunResponse)
 def run_table_cascade(payload: CascadeRunRequest, db: Session = Depends(get_db)):
+    started_at = time.perf_counter()
+    logger.info(
+        "API /api/cascade/run start: managers=%s useLlm=%s reportYear=%s maxItemsPerDeputy=%s persist=%s",
+        len(payload.managers or []),
+        payload.useLlm,
+        payload.reportYear or "-",
+        payload.maxItemsPerDeputy,
+        payload.persist,
+    )
     repo = CascadeRepository(db)
     snapshot = repo.load_snapshot(report_year=payload.reportYear or "")
     service = CascadeService(snapshot)
@@ -57,6 +69,7 @@ def run_table_cascade(payload: CascadeRunRequest, db: Session = Depends(get_db))
         report_year=payload.reportYear or "",
         managers=payload.managers,
         max_items_per_deputy=payload.maxItemsPerDeputy,
+        use_llm=payload.useLlm,
     )
     run_id = str(uuid.uuid4())
     created_at = ""
@@ -79,7 +92,7 @@ def run_table_cascade(payload: CascadeRunRequest, db: Session = Depends(get_db))
 
         created_at = datetime.now(timezone.utc).isoformat()
 
-    return CascadeRunResponse(
+    response = CascadeRunResponse(
         run=_make_summary(
             run_id=run_id,
             created_at=created_at,
@@ -94,6 +107,14 @@ def run_table_cascade(payload: CascadeRunRequest, db: Session = Depends(get_db))
         items=[CascadeGoalItem.model_validate(item) for item in result.items],
         unmatched=[CascadeUnmatchedManager.model_validate(item) for item in result.unmatched],
     )
+    logger.info(
+        "API /api/cascade/run finished in %.2fs: items=%s unmatched=%s totalManagers=%s",
+        time.perf_counter() - started_at,
+        len(response.items),
+        len(response.unmatched),
+        response.run.totalManagers,
+    )
+    return response
 
 
 @router.get("/runs", response_model=CascadeRunListResponse)

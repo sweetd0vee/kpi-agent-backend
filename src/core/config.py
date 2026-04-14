@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     cascade_llm_judge_model: str = "qwen3:8b"
     # Таймаут judge-запроса в секундах.
     cascade_llm_timeout_sec: float = 120.0
+    # Ограничение количества целей на одного заместителя, которые дополнительно проверяются через LLM.
+    cascade_llm_max_candidates_per_deputy: int = 15
     upload_dir: str = "uploads"  # каталог для загруженных файлов базы знаний
     # Локальный запуск: порт 5434 при маппинге 5434:5432 в docker-compose; в Docker задайте DATABASE_URL с хостом db
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5434/ai-kpi"
