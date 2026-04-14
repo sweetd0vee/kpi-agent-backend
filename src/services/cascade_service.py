@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import time
@@ -52,13 +51,13 @@ class CascadeComputationResult:
     warnings: list[str]
     unmatched: list[dict[str, str]]
     items: list[dict[str, object]]
+    fallback_goals: list[dict[str, str]]
 
 
 class CascadeService:
     def __init__(self, snapshot: CascadeSnapshot) -> None:
         self.snapshot = snapshot
         self.llm = CascadeLlmAdapter()
-        self._relevance_cache: dict[str, dict[str, object]] = {}
 
     def run(
         self,
@@ -86,22 +85,31 @@ class CascadeService:
         all_deputies: set[str] = set()
         items: list[dict[str, object]] = []
         unmatched: list[dict[str, str]] = []
+        fallback_goals: list[dict[str, str]] = []
         warnings: list[str] = []
 
         for manager_name in selected:
             manager_started = time.perf_counter()
+            source_goals = self._build_source_goals_for_manager(manager_name, report_year=report_year)
             deputies = sorted(manager_to_deputies.get(manager_name, set()))
             if not deputies:
+                reason = "В staff не найдены подчиненные по полю functionalBlockCurator."
                 logger.info("Manager '%s': no deputies found in staff", manager_name)
                 unmatched.append(
                     {
                         "managerName": manager_name,
-                        "reason": "В staff не найдены подчиненные по полю functionalBlockCurator.",
+                        "reason": reason,
                         "reportYear": report_year,
                     }
                 )
+                self._append_fallback_goals_for_manager(
+                    manager_name=manager_name,
+                    source_goals=source_goals,
+                    reason=reason,
+                    report_year=report_year,
+                    out=fallback_goals,
+                )
                 continue
-            source_goals = self._build_source_goals_for_manager(manager_name, report_year=report_year)
             if not source_goals:
                 logger.info("Manager '%s': no source goals found", manager_name)
                 unmatched.append(
@@ -124,6 +132,7 @@ class CascadeService:
                 all_deputies.add(deputy_name)
                 deputy_processes = self._get_processes_for_person(person_to_processes, deputy_name)
                 if not deputy_processes:
+                    reason = f"Для заместителя '{deputy_name}' не найдены процессы в реестре процессов."
                     logger.info(
                         "Manager '%s' deputy '%s': no processes in registry",
                         manager_name,
@@ -132,9 +141,16 @@ class CascadeService:
                     unmatched.append(
                         {
                             "managerName": manager_name,
-                            "reason": f"Для заместителя '{deputy_name}' не найдены процессы в реестре процессов.",
+                            "reason": reason,
                             "reportYear": report_year,
                         }
+                    )
+                    self._append_fallback_goals_for_manager(
+                        manager_name=manager_name,
+                        source_goals=source_goals,
+                        reason=reason,
+                        report_year=report_year,
+                        out=fallback_goals,
                     )
                     continue
                 deputy_goals = self._filter_goals_by_process_relevance(
@@ -144,6 +160,7 @@ class CascadeService:
                     use_llm=use_llm,
                 )
                 if not deputy_goals:
+                    reason = f"Для заместителя '{deputy_name}' не найдено релевантных целей по его процессам."
                     logger.info(
                         "Manager '%s' deputy '%s': no relevant goals after filtering (processes=%s)",
                         manager_name,
@@ -153,9 +170,16 @@ class CascadeService:
                     unmatched.append(
                         {
                             "managerName": manager_name,
-                            "reason": f"Для заместителя '{deputy_name}' не найдено релевантных целей по его процессам.",
+                            "reason": reason,
                             "reportYear": report_year,
                         }
+                    )
+                    self._append_fallback_goals_for_manager(
+                        manager_name=manager_name,
+                        source_goals=source_goals,
+                        reason=reason,
+                        report_year=report_year,
+                        out=fallback_goals,
                     )
                     continue
                 logger.info(
@@ -196,12 +220,12 @@ class CascadeService:
         if not items:
             warnings.append("Каскадирование не дало назначений. Проверьте заполненность staff и целей.")
         logger.info(
-            "Cascade run finished in %.2fs: items=%s unmatched=%s deputies=%s llm_cache_size=%s",
+            "Cascade run finished in %.2fs: items=%s unmatched=%s fallback_goals=%s deputies=%s",
             time.perf_counter() - started_at,
             len(items),
             len(unmatched),
+            len(fallback_goals),
             len(all_deputies),
-            len(self._relevance_cache),
         )
 
         return CascadeComputationResult(
@@ -212,7 +236,35 @@ class CascadeService:
             warnings=warnings,
             unmatched=unmatched,
             items=items,
+            fallback_goals=fallback_goals,
         )
+
+    def _append_fallback_goals_for_manager(
+        self,
+        *,
+        manager_name: str,
+        source_goals: list[dict[str, str]],
+        reason: str,
+        report_year: str,
+        out: list[dict[str, str]],
+    ) -> None:
+        if not source_goals:
+            return
+        for source in source_goals:
+            out.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "managerName": manager_name,
+                    "sourceType": str(source.get("sourceType") or ""),
+                    "sourceRowId": str(source.get("sourceRowId") or ""),
+                    "sourceGoalTitle": str(source.get("sourceGoalTitle") or ""),
+                    "sourceMetric": str(source.get("sourceMetric") or ""),
+                    "businessUnit": str(source.get("businessUnit") or ""),
+                    "department": str(source.get("department") or ""),
+                    "reportYear": str(source.get("reportYear") or report_year),
+                    "reason": reason,
+                }
+            )
 
     def _build_manager_tree(self) -> dict[str, set[str]]:
         tree: dict[str, set[str]] = {}
@@ -287,36 +339,29 @@ class CascadeService:
         llm_calls = 0
         llm_cache_hits = 0
 
+        llm_bulk_map: dict[int, dict[str, object]] = {}
+        llm_candidates = [source for _, source in scored_candidates[:llm_limit]]
+        if use_llm and llm_candidates:
+            llm_calls = 1
+            llm_bulk = self.llm.assess_goals_relevance_bulk(
+                subject_name=subject_name,
+                process_names=process_names,
+                goals=llm_candidates,
+                force=True,
+            )
+            if isinstance(llm_bulk, dict):
+                llm_bulk_map = llm_bulk
+
         filtered: list[dict[str, str]] = []
         for idx, (_score, source) in enumerate(scored_candidates):
             goal_title = str(source.get("sourceGoalTitle") or "")
             goal_metric = str(source.get("sourceMetric") or "")
-            goal_text = f"{goal_title} {goal_metric}".strip()
 
             relevant = True  # keyword prefilter уже выполнен выше
             llm_reason = ""
             llm_confidence: Optional[float] = None
             if use_llm and idx < llm_limit:
-                cache_key = self._build_relevance_cache_key(
-                    subject_name=subject_name,
-                    process_names=process_names,
-                    goal_title=goal_title,
-                    goal_metric=goal_metric,
-                )
-                llm_result = self._relevance_cache.get(cache_key)
-                if llm_result is None:
-                    llm_calls += 1
-                    llm_result = self.llm.assess_goal_relevance(
-                        subject_name=subject_name,
-                        process_names=process_names,
-                        goal_title=goal_title,
-                        goal_metric=goal_metric,
-                        force=True,
-                    )
-                    if llm_result is not None:
-                        self._relevance_cache[cache_key] = llm_result
-                else:
-                    llm_cache_hits += 1
+                llm_result = llm_bulk_map.get(idx)
                 if llm_result is not None:
                     relevant = bool(llm_result.get("relevant"))
                     llm_reason = str(llm_result.get("reason") or "").strip()
@@ -375,24 +420,6 @@ class CascadeService:
             if score > best_score:
                 best_score = score
         return best_score
-
-    def _build_relevance_cache_key(
-        self,
-        *,
-        subject_name: str,
-        process_names: list[str],
-        goal_title: str,
-        goal_metric: str,
-    ) -> str:
-        normalized = "|".join(
-            [
-                norm_text(subject_name),
-                ",".join(sorted(norm_text(p) for p in process_names)),
-                norm_text(goal_title),
-                norm_text(goal_metric),
-            ]
-        )
-        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     def _tokenize(self, text: str) -> set[str]:
         parts = re.split(r"[^a-zA-Zа-яА-Я0-9]+", norm_text(text))

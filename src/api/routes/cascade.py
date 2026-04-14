@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from src.db.database import get_db
 from src.models.cascade import (
+    CascadeFallbackGoal,
     CascadeGoalItem,
     CascadeRunListResponse,
     CascadeRunRequest,
@@ -64,6 +65,14 @@ def run_table_cascade(payload: CascadeRunRequest, db: Session = Depends(get_db))
     )
     repo = CascadeRepository(db)
     snapshot = repo.load_snapshot(report_year=payload.reportYear or "")
+    logger.info(
+        "Cascade snapshot loaded: board=%s leader=%s strategy=%s staff=%s process_registry=%s",
+        len(snapshot.board_rows),
+        len(snapshot.leader_rows),
+        len(snapshot.strategy_rows),
+        len(snapshot.staff_rows),
+        len(snapshot.process_rows),
+    )
     service = CascadeService(snapshot)
     result = service.run(
         report_year=payload.reportYear or "",
@@ -106,6 +115,7 @@ def run_table_cascade(payload: CascadeRunRequest, db: Session = Depends(get_db))
         ),
         items=[CascadeGoalItem.model_validate(item) for item in result.items],
         unmatched=[CascadeUnmatchedManager.model_validate(item) for item in result.unmatched],
+        fallbackGoals=[CascadeFallbackGoal.model_validate(item) for item in result.fallback_goals],
     )
     logger.info(
         "API /api/cascade/run finished in %.2fs: items=%s unmatched=%s totalManagers=%s",
@@ -198,4 +208,5 @@ def get_cascade_run(run_id: str, db: Session = Depends(get_db)):
         ),
         items=items,
         unmatched=unmatched,
+        fallbackGoals=[],
     )

@@ -38,9 +38,11 @@ class Settings(BaseSettings):
     # Этап 2: включить LLM-оценку для табличного каскадирования.
     enable_cascade_llm: bool = False
     # Модель Ollama для judge-оценки пар KPI в табличном каскаде.
-    cascade_llm_judge_model: str = "qwen3:8b"
+    cascade_llm_judge_model: str = "llama3.2"
+    # Резервная модель для LLM-фильтрации (если основная не ответила вовремя).
+    cascade_llm_fallback_model: str = ""
     # Таймаут judge-запроса в секундах.
-    cascade_llm_timeout_sec: float = 120.0
+    cascade_llm_timeout_sec: float = 35.0
     # Ограничение количества целей на одного заместителя, которые дополнительно проверяются через LLM.
     cascade_llm_max_candidates_per_deputy: int = 15
     upload_dir: str = "uploads"  # каталог для загруженных файлов базы знаний

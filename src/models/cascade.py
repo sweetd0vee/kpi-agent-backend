@@ -34,6 +34,19 @@ class CascadeUnmatchedManager(BaseModel):
     reportYear: str = ""
 
 
+class CascadeFallbackGoal(BaseModel):
+    id: str
+    managerName: str
+    sourceType: str
+    sourceRowId: str
+    sourceGoalTitle: str = ""
+    sourceMetric: str = ""
+    businessUnit: str = ""
+    department: str = ""
+    reportYear: str = ""
+    reason: str = ""
+
+
 class CascadeRunSummary(BaseModel):
     runId: str
     createdAt: str
@@ -50,6 +63,7 @@ class CascadeRunResponse(BaseModel):
     run: CascadeRunSummary
     items: List[CascadeGoalItem]
     unmatched: List[CascadeUnmatchedManager]
+    fallbackGoals: List[CascadeFallbackGoal] = Field(default_factory=list)
 
 
 class CascadeRunListResponse(BaseModel):

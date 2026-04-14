@@ -53,7 +53,7 @@ class CascadeLlmAdapter:
     ) -> Optional[dict[str, object]]:
         if not self.enabled and not force:
             return None
-        model = getattr(settings, "cascade_llm_judge_model", "qwen3:8b")
+        model = getattr(settings, "cascade_llm_judge_model", "llama3.2")
         prompt = (
             "Ты эксперт по каскадированию KPI.\n"
             "Оцени соответствие KPI заместителя цели руководителя.\n"
@@ -86,7 +86,7 @@ class CascadeLlmAdapter:
         if not process_names:
             return None
         started_at = time.perf_counter()
-        model = getattr(settings, "cascade_llm_judge_model", "qwen3:8b")
+        model = getattr(settings, "cascade_llm_judge_model", "llama3.2")
         process_text = "\n".join(f"- {name}" for name in process_names[:50])
         prompt = (
             "Ты эксперт по каскадированию KPI и процессному управлению.\n"
@@ -98,28 +98,13 @@ class CascadeLlmAdapter:
             f"Цель руководителя: {goal_title}\n"
             f"Метрика цели: {goal_metric}\n"
         )
-        raw = chat_completion(
-            [{"role": "user", "content": prompt}],
-            model=model,
-            temperature=0.1,
-            use_ollama=True,
-            timeout=getattr(settings, "cascade_llm_timeout_sec", 120.0),
-        )
-        if not raw:
+        parsed = self._ask_json_with_fallback(prompt, model=model)
+        if not parsed:
             logger.warning(
                 "LLM relevance '%s': empty response (model=%s, processes=%s, elapsed=%.2fs)",
                 subject_name,
                 model,
                 len(process_names),
-                time.perf_counter() - started_at,
-            )
-            return None
-        parsed = _extract_json(raw)
-        if not isinstance(parsed, dict):
-            logger.warning(
-                "LLM relevance '%s': invalid JSON response (model=%s, elapsed=%.2fs)",
-                subject_name,
-                model,
                 time.perf_counter() - started_at,
             )
             return None
@@ -139,6 +124,87 @@ class CascadeLlmAdapter:
             time.perf_counter() - started_at,
         )
         return {"relevant": relevant, "confidence": confidence, "reason": reason}
+
+    def assess_goals_relevance_bulk(
+        self,
+        *,
+        subject_name: str,
+        process_names: list[str],
+        goals: list[dict[str, str]],
+        force: bool = False,
+    ) -> Optional[dict[int, dict[str, object]]]:
+        if not self.enabled and not force:
+            return None
+        if not process_names or not goals:
+            return None
+        model = getattr(settings, "cascade_llm_judge_model", "llama3.2")
+        process_text = "\n".join(f"- {name}" for name in process_names[:30])
+        goals_text = "\n".join(
+            f"- idx={idx}; goal={g.get('sourceGoalTitle','')}; metric={g.get('sourceMetric','')}"
+            for idx, g in enumerate(goals)
+        )
+        prompt = (
+            "Ты эксперт по каскадированию KPI и процессному управлению.\n"
+            "Для каждого кандидата цели оцени релевантность процессам сотрудника.\n"
+            "Верни строго JSON:\n"
+            '{"items":[{"idx":0,"relevant":true,"confidence":0.0,"reason":""}]}\n\n'
+            f"Сотрудник: {subject_name}\n"
+            f"Процессы сотрудника:\n{process_text}\n\n"
+            f"Кандидаты целей:\n{goals_text}\n"
+        )
+        parsed = self._ask_json_with_fallback(prompt, model=model)
+        if not isinstance(parsed, dict):
+            return None
+        raw_items = parsed.get("items")
+        if not isinstance(raw_items, list):
+            return None
+        out: dict[int, dict[str, object]] = {}
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                idx = int(item.get("idx"))
+            except (TypeError, ValueError):
+                continue
+            if idx < 0 or idx >= len(goals):
+                continue
+            relevant = bool(item.get("relevant"))
+            try:
+                confidence = float(item.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            confidence = max(0.0, min(1.0, confidence))
+            reason = str(item.get("reason") or "").strip()
+            out[idx] = {"relevant": relevant, "confidence": confidence, "reason": reason}
+        return out or None
+
+    def _ask_json_with_fallback(self, prompt: str, *, model: str) -> Optional[dict]:
+        timeout = getattr(settings, "cascade_llm_timeout_sec", 35.0)
+        messages = [{"role": "user", "content": prompt}]
+        raw = chat_completion(
+            messages,
+            model=model,
+            temperature=0.1,
+            use_ollama=True,
+            timeout=timeout,
+        )
+        parsed = _extract_json(raw or "")
+        if isinstance(parsed, dict):
+            return parsed
+
+        fallback_model = str(getattr(settings, "cascade_llm_fallback_model", "") or "").strip()
+        if not fallback_model or fallback_model == model:
+            return None
+        logger.warning("Primary LLM model '%s' failed, trying fallback '%s'", model, fallback_model)
+        raw_fb = chat_completion(
+            messages,
+            model=fallback_model,
+            temperature=0.1,
+            use_ollama=True,
+            timeout=timeout,
+        )
+        parsed_fb = _extract_json(raw_fb or "")
+        return parsed_fb if isinstance(parsed_fb, dict) else None
 
 
 def _extract_json(raw: str) -> Optional[dict]:
