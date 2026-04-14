@@ -37,6 +37,7 @@ class CascadeUnmatchedManager(BaseModel):
 class CascadeFallbackGoal(BaseModel):
     id: str
     managerName: str
+    deputyName: str = ""
     sourceType: str
     sourceRowId: str
     sourceGoalTitle: str = ""

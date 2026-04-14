@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import re
 import time
 import uuid
@@ -86,6 +87,9 @@ class CascadeService:
         items: list[dict[str, object]] = []
         unmatched: list[dict[str, str]] = []
         fallback_goals: list[dict[str, str]] = []
+        item_seen: set[tuple[str, str, str, str, str, str]] = set()
+        fallback_seen: set[tuple[str, str, str, str, str, str]] = set()
+        rng = random.Random()
         warnings: list[str] = []
 
         for manager_name in selected:
@@ -104,10 +108,14 @@ class CascadeService:
                 )
                 self._append_fallback_goals_for_manager(
                     manager_name=manager_name,
+                    deputy_name="",
                     source_goals=source_goals,
                     reason=reason,
                     report_year=report_year,
+                    max_items=max_per_deputy,
+                    rng=rng,
                     out=fallback_goals,
+                    seen=fallback_seen,
                 )
                 continue
             if not source_goals:
@@ -147,10 +155,14 @@ class CascadeService:
                     )
                     self._append_fallback_goals_for_manager(
                         manager_name=manager_name,
+                        deputy_name=deputy_name,
                         source_goals=source_goals,
                         reason=reason,
                         report_year=report_year,
+                        max_items=max_per_deputy,
+                        rng=rng,
                         out=fallback_goals,
+                        seen=fallback_seen,
                     )
                     continue
                 deputy_goals = self._filter_goals_by_process_relevance(
@@ -176,10 +188,14 @@ class CascadeService:
                     )
                     self._append_fallback_goals_for_manager(
                         manager_name=manager_name,
+                        deputy_name=deputy_name,
                         source_goals=source_goals,
                         reason=reason,
                         report_year=report_year,
+                        max_items=max_per_deputy,
+                        rng=rng,
                         out=fallback_goals,
+                        seen=fallback_seen,
                     )
                     continue
                 logger.info(
@@ -190,15 +206,30 @@ class CascadeService:
                     len(deputy_processes),
                 )
                 for source in deputy_goals[:max_per_deputy]:
+                    source_type = str(source.get("sourceType") or "")
+                    source_row_id = str(source.get("sourceRowId") or "")
+                    source_goal_title = str(source.get("sourceGoalTitle") or "")
+                    source_metric = str(source.get("sourceMetric") or "")
+                    unique_key = (
+                        normalize_name(manager_name),
+                        normalize_name(deputy_name),
+                        source_type,
+                        source_row_id,
+                        norm_text(source_goal_title),
+                        norm_text(source_metric),
+                    )
+                    if unique_key in item_seen:
+                        continue
+                    item_seen.add(unique_key)
                     items.append(
                         {
                             "id": str(uuid.uuid4()),
                             "managerName": manager_name,
                             "deputyName": deputy_name,
-                            "sourceType": source["sourceType"],
-                            "sourceRowId": source["sourceRowId"],
-                            "sourceGoalTitle": source["sourceGoalTitle"],
-                            "sourceMetric": source["sourceMetric"],
+                            "sourceType": source_type,
+                            "sourceRowId": source_row_id,
+                            "sourceGoalTitle": source_goal_title,
+                            "sourceMetric": source_metric,
                             "businessUnit": source["businessUnit"],
                             "department": source["department"],
                             "reportYear": source["reportYear"] or report_year,
@@ -243,22 +274,44 @@ class CascadeService:
         self,
         *,
         manager_name: str,
+        deputy_name: str,
         source_goals: list[dict[str, str]],
         reason: str,
         report_year: str,
+        max_items: int,
+        rng: random.Random,
         out: list[dict[str, str]],
+        seen: set[tuple[str, str, str, str, str, str]],
     ) -> None:
         if not source_goals:
             return
-        for source in source_goals:
+        random_goals = list(source_goals)
+        rng.shuffle(random_goals)
+        for source in random_goals[: max(1, min(max_items, len(random_goals)))]:
+            source_type = str(source.get("sourceType") or "")
+            source_row_id = str(source.get("sourceRowId") or "")
+            source_goal_title = str(source.get("sourceGoalTitle") or "")
+            source_metric = str(source.get("sourceMetric") or "")
+            unique_key = (
+                normalize_name(manager_name),
+                normalize_name(deputy_name),
+                source_type,
+                source_row_id,
+                norm_text(source_goal_title),
+                norm_text(source_metric),
+            )
+            if unique_key in seen:
+                continue
+            seen.add(unique_key)
             out.append(
                 {
                     "id": str(uuid.uuid4()),
                     "managerName": manager_name,
-                    "sourceType": str(source.get("sourceType") or ""),
-                    "sourceRowId": str(source.get("sourceRowId") or ""),
-                    "sourceGoalTitle": str(source.get("sourceGoalTitle") or ""),
-                    "sourceMetric": str(source.get("sourceMetric") or ""),
+                    "deputyName": deputy_name,
+                    "sourceType": source_type,
+                    "sourceRowId": source_row_id,
+                    "sourceGoalTitle": source_goal_title,
+                    "sourceMetric": source_metric,
                     "businessUnit": str(source.get("businessUnit") or ""),
                     "department": str(source.get("department") or ""),
                     "reportYear": str(source.get("reportYear") or report_year),
