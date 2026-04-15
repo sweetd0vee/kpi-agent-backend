@@ -53,6 +53,8 @@ class CascadeRunSummary(BaseModel):
     createdAt: str
     status: str
     reportYear: str = ""
+    managers: List[str] = Field(default_factory=list)
+    useLlm: bool = False
     totalManagers: int
     totalDeputies: int
     totalItems: int

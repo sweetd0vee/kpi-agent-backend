@@ -53,7 +53,7 @@ class CascadeLlmAdapter:
     ) -> Optional[dict[str, object]]:
         if not self.enabled and not force:
             return None
-        model = getattr(settings, "cascade_llm_judge_model", "llama3.2")
+        model = getattr(settings, "cascade_llm_judge_model", "qwen3:8b")
         prompt = (
             "Ты эксперт по каскадированию KPI.\n"
             "Оцени соответствие KPI заместителя цели руководителя.\n"
@@ -86,7 +86,7 @@ class CascadeLlmAdapter:
         if not process_names:
             return None
         started_at = time.perf_counter()
-        model = getattr(settings, "cascade_llm_judge_model", "llama3.2")
+        model = getattr(settings, "cascade_llm_judge_model", "qwen3:8b")
         process_text = "\n".join(f"- {name}" for name in process_names[:50])
         prompt = (
             "Ты эксперт по каскадированию KPI и процессному управлению.\n"
@@ -125,6 +125,61 @@ class CascadeLlmAdapter:
         )
         return {"relevant": relevant, "confidence": confidence, "reason": reason}
 
+    def assess_responsible_executor_match(
+        self,
+        *,
+        deputy_name: str,
+        responsible_executor: str,
+        goal_title: str,
+        initiative: str,
+        force: bool = False,
+    ) -> Optional[dict[str, object]]:
+        """Сопоставляет ФИО заместителя со строкой "Ответственный исполнитель" из стратегии."""
+        if not self.enabled and not force:
+            return None
+        if not deputy_name or not responsible_executor:
+            return None
+        started_at = time.perf_counter()
+        model = getattr(settings, "cascade_llm_judge_model", "qwen3:8b")
+        prompt = (
+            "Ты эксперт по оргструктуре и каскадированию целей.\n"
+            "Определи, соответствует ли строка 'Ответственный исполнитель' конкретному заместителю.\n"
+            "В строке могут быть сокращения и ФИО в скобках, например: 'ДЦР (Пинчук Ю.В.)'.\n"
+            "Верни строго JSON без пояснений:\n"
+            '{"match": true|false, "confidence": 0..1, "reason": "кратко"}\n\n'
+            f"Заместитель (эталон): {deputy_name}\n"
+            f"Ответственный исполнитель (из стратегии): {responsible_executor}\n"
+            f"Цель: {goal_title}\n"
+            f"Инициатива: {initiative}\n"
+        )
+        parsed = self._ask_json_with_fallback(prompt, model=model)
+        if not parsed:
+            logger.warning(
+                "LLM responsible match '%s' vs '%s': empty response (model=%s, elapsed=%.2fs)",
+                deputy_name,
+                responsible_executor,
+                model,
+                time.perf_counter() - started_at,
+            )
+            return None
+        matched = bool(parsed.get("match"))
+        try:
+            confidence = float(parsed.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+        reason = str(parsed.get("reason") or "").strip()
+        logger.info(
+            "LLM responsible match '%s' vs '%s': match=%s confidence=%.3f model=%s elapsed=%.2fs",
+            deputy_name,
+            responsible_executor,
+            matched,
+            confidence,
+            model,
+            time.perf_counter() - started_at,
+        )
+        return {"match": matched, "confidence": confidence, "reason": reason}
+
     def assess_goals_relevance_bulk(
         self,
         *,
@@ -137,7 +192,7 @@ class CascadeLlmAdapter:
             return None
         if not process_names or not goals:
             return None
-        model = getattr(settings, "cascade_llm_judge_model", "llama3.2")
+        model = getattr(settings, "cascade_llm_judge_model", "qwen3:8b")
         process_text = "\n".join(f"- {name}" for name in process_names[:30])
         goals_text = "\n".join(
             f"- idx={idx}; goal={g.get('sourceGoalTitle','')}; metric={g.get('sourceMetric','')}"

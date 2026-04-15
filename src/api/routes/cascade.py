@@ -33,6 +33,8 @@ def _make_summary(
     created_at: str,
     status: str,
     report_year: str,
+    managers: list[str],
+    use_llm: bool,
     total_managers: int,
     total_deputies: int,
     total_items: int,
@@ -44,12 +46,29 @@ def _make_summary(
         createdAt=created_at,
         status=status,
         reportYear=report_year,
+        managers=managers,
+        useLlm=use_llm,
         totalManagers=total_managers,
         totalDeputies=total_deputies,
         totalItems=total_items,
         unmatchedManagers=unmatched_count,
         warnings=warnings,
     )
+
+
+def _parse_managers_filter(raw: str) -> tuple[list[str], bool]:
+    try:
+        parsed = json.loads(raw or "")
+    except json.JSONDecodeError:
+        return [], False
+    if isinstance(parsed, list):
+        return [str(x) for x in parsed if str(x).strip()], False
+    if isinstance(parsed, dict):
+        managers_raw = parsed.get("managers")
+        managers = [str(x) for x in managers_raw] if isinstance(managers_raw, list) else []
+        use_llm = bool(parsed.get("useLlm"))
+        return [m for m in managers if m.strip()], use_llm
+    return [], False
 
 
 @router.post("/run", response_model=CascadeRunResponse)
@@ -86,6 +105,7 @@ def run_table_cascade(payload: CascadeRunRequest, db: Session = Depends(get_db))
         run_id = repo.save_run(
             report_year=result.report_year,
             managers=result.selected_managers,
+            use_llm=payload.useLlm,
             status="success",
             warnings=result.warnings,
             unmatched=result.unmatched,
@@ -107,6 +127,8 @@ def run_table_cascade(payload: CascadeRunRequest, db: Session = Depends(get_db))
             created_at=created_at,
             status="success",
             report_year=result.report_year,
+            managers=result.selected_managers,
+            use_llm=payload.useLlm,
             total_managers=result.total_managers,
             total_deputies=result.total_deputies,
             total_items=len(result.items),
@@ -133,6 +155,7 @@ def list_cascade_runs(limit: int = Query(default=20, ge=1, le=200), db: Session 
     runs = repo.list_runs(limit=limit)
     out = []
     for row in runs:
+        managers, use_llm = _parse_managers_filter(row.managers_filter or "")
         try:
             warnings = json.loads(row.warnings_json or "[]")
             if not isinstance(warnings, list):
@@ -145,6 +168,8 @@ def list_cascade_runs(limit: int = Query(default=20, ge=1, le=200), db: Session 
                 created_at=row.created_at,
                 status=row.status,
                 report_year=row.report_year,
+                managers=managers,
+                use_llm=use_llm,
                 total_managers=row.total_managers,
                 total_deputies=row.total_deputies,
                 total_items=row.total_items,
@@ -193,6 +218,7 @@ def get_cascade_run(run_id: str, db: Session = Depends(get_db)):
         for item in repo.get_run_items(run_id)
     ]
     unmatched = [CascadeUnmatchedManager.model_validate(x) for x in unmatched_raw]
+    managers, use_llm = _parse_managers_filter(row.managers_filter or "")
 
     return CascadeRunResponse(
         run=_make_summary(
@@ -200,6 +226,8 @@ def get_cascade_run(run_id: str, db: Session = Depends(get_db)):
             created_at=row.created_at,
             status=row.status,
             report_year=row.report_year,
+            managers=managers,
+            use_llm=use_llm,
             total_managers=row.total_managers,
             total_deputies=row.total_deputies,
             total_items=row.total_items,
@@ -210,3 +238,22 @@ def get_cascade_run(run_id: str, db: Session = Depends(get_db)):
         unmatched=unmatched,
         fallbackGoals=[],
     )
+
+
+@router.delete("/runs/{run_id}")
+def delete_cascade_run(run_id: str, db: Session = Depends(get_db)):
+    repo = CascadeRepository(db)
+    deleted = repo.delete_run(run_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Запуск каскадирования не найден.")
+    return {"ok": True, "runId": run_id}
+
+
+@router.post("/runs/{run_id}/delete")
+def delete_cascade_run_via_post(run_id: str, db: Session = Depends(get_db)):
+    """Совместимость для окружений, где DELETE может быть запрещен прокси/шлюзом."""
+    repo = CascadeRepository(db)
+    deleted = repo.delete_run(run_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Запуск каскадирования не найден.")
+    return {"ok": True, "runId": run_id}

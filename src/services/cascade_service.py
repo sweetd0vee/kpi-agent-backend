@@ -71,16 +71,16 @@ class CascadeService:
         started_at = time.perf_counter()
         manager_to_deputies = self._build_manager_tree()
         person_to_processes = self._build_manager_processes()
+        person_to_business_units = self._build_person_business_units()
         selected = [m.strip() for m in (managers or []) if m and m.strip()]
         if not selected:
             selected = sorted(manager_to_deputies.keys())
-        max_per_deputy = max(1, min(max_items_per_deputy, 200))
         logger.info(
-            "Cascade run started: managers=%s use_llm=%s report_year=%s max_per_deputy=%s",
+            "Cascade run started: managers=%s use_llm=%s report_year=%s max_per_deputy=unlimited (requested=%s)",
             len(selected),
             use_llm,
             report_year or "-",
-            max_per_deputy,
+            max_items_per_deputy,
         )
 
         all_deputies: set[str] = set()
@@ -89,6 +89,7 @@ class CascadeService:
         fallback_goals: list[dict[str, str]] = []
         item_seen: set[tuple[str, str, str, str, str, str]] = set()
         fallback_seen: set[tuple[str, str, str, str, str, str]] = set()
+        strategy_executor_match_cache: dict[tuple[str, str], tuple[bool, str]] = {}
         rng = random.Random()
         warnings: list[str] = []
 
@@ -112,7 +113,6 @@ class CascadeService:
                     source_goals=source_goals,
                     reason=reason,
                     report_year=report_year,
-                    max_items=max_per_deputy,
                     rng=rng,
                     out=fallback_goals,
                     seen=fallback_seen,
@@ -139,6 +139,10 @@ class CascadeService:
             for deputy_name in deputies:
                 all_deputies.add(deputy_name)
                 deputy_processes = self._get_processes_for_person(person_to_processes, deputy_name)
+                deputy_business_units = self._get_business_units_for_person(
+                    person_to_business_units,
+                    deputy_name,
+                )
                 if not deputy_processes:
                     reason = f"Для заместителя '{deputy_name}' не найдены процессы в реестре процессов."
                     logger.info(
@@ -159,7 +163,6 @@ class CascadeService:
                         source_goals=source_goals,
                         reason=reason,
                         report_year=report_year,
-                        max_items=max_per_deputy,
                         rng=rng,
                         out=fallback_goals,
                         seen=fallback_seen,
@@ -168,16 +171,28 @@ class CascadeService:
                 deputy_goals = self._filter_goals_by_process_relevance(
                     subject_name=deputy_name,
                     process_names=deputy_processes,
+                    deputy_business_units=deputy_business_units,
                     source_goals=source_goals,
                     use_llm=use_llm,
                 )
+                strategy_direct_goals = self._build_strategy_goals_for_deputy(
+                    deputy_name=deputy_name,
+                    report_year=report_year,
+                    use_llm=use_llm,
+                    match_cache=strategy_executor_match_cache,
+                )
+                deputy_goals = self._merge_goal_candidates(deputy_goals, strategy_direct_goals)
                 if not deputy_goals:
-                    reason = f"Для заместителя '{deputy_name}' не найдено релевантных целей по его процессам."
+                    reason = (
+                        f"Для заместителя '{deputy_name}' не найдено релевантных целей "
+                        "ни по процессам, ни по таблице стратегии."
+                    )
                     logger.info(
-                        "Manager '%s' deputy '%s': no relevant goals after filtering (processes=%s)",
+                        "Manager '%s' deputy '%s': no relevant goals after filtering (processes=%s, strategy_direct=%s)",
                         manager_name,
                         deputy_name,
                         len(deputy_processes),
+                        len(strategy_direct_goals),
                     )
                     unmatched.append(
                         {
@@ -192,20 +207,21 @@ class CascadeService:
                         source_goals=source_goals,
                         reason=reason,
                         report_year=report_year,
-                        max_items=max_per_deputy,
                         rng=rng,
                         out=fallback_goals,
                         seen=fallback_seen,
                     )
                     continue
                 logger.info(
-                    "Manager '%s' deputy '%s': relevant_goals=%s (processes=%s)",
+                    "Manager '%s' deputy '%s': relevant_goals=%s (processes=%s, business_units=%s, strategy_direct=%s)",
                     manager_name,
                     deputy_name,
                     len(deputy_goals),
                     len(deputy_processes),
+                    len(deputy_business_units),
+                    len(strategy_direct_goals),
                 )
-                for source in deputy_goals[:max_per_deputy]:
+                for source in deputy_goals:
                     source_type = str(source.get("sourceType") or "")
                     source_row_id = str(source.get("sourceRowId") or "")
                     source_goal_title = str(source.get("sourceGoalTitle") or "")
@@ -278,7 +294,6 @@ class CascadeService:
         source_goals: list[dict[str, str]],
         reason: str,
         report_year: str,
-        max_items: int,
         rng: random.Random,
         out: list[dict[str, str]],
         seen: set[tuple[str, str, str, str, str, str]],
@@ -287,7 +302,7 @@ class CascadeService:
             return
         random_goals = list(source_goals)
         rng.shuffle(random_goals)
-        for source in random_goals[: max(1, min(max_items, len(random_goals)))]:
+        for source in random_goals:
             source_type = str(source.get("sourceType") or "")
             source_row_id = str(source.get("sourceRowId") or "")
             source_goal_title = str(source.get("sourceGoalTitle") or "")
@@ -344,6 +359,20 @@ class CascadeService:
                 processes[existing_key].append(process_name)
         return processes
 
+    def _build_person_business_units(self) -> dict[str, list[str]]:
+        units: dict[str, list[str]] = {}
+        for row in self.snapshot.staff_rows:
+            person_name = str(row.head or "").strip()
+            if not person_name:
+                continue
+            values = [str(row.business_unit or "").strip(), str(row.unit_name or "").strip()]
+            existing_key = next((key for key in units if names_match(key, person_name)), person_name)
+            units.setdefault(existing_key, [])
+            for value in values:
+                if value and value not in units[existing_key]:
+                    units[existing_key].append(value)
+        return units
+
     def _get_processes_for_person(
         self,
         person_to_processes: dict[str, list[str]],
@@ -357,43 +386,70 @@ class CascadeService:
                 return values
         return []
 
+    def _get_business_units_for_person(
+        self,
+        person_to_units: dict[str, list[str]],
+        person_name: str,
+    ) -> list[str]:
+        direct = person_to_units.get(person_name)
+        if direct:
+            return direct
+        for key, values in person_to_units.items():
+            if names_match(key, person_name):
+                return values
+        return []
+
     def _filter_goals_by_process_relevance(
         self,
         *,
         subject_name: str,
         process_names: list[str],
+        deputy_business_units: list[str],
         source_goals: list[dict[str, str]],
         use_llm: bool,
     ) -> list[dict[str, str]]:
         filter_started = time.perf_counter()
-        scored_candidates: list[tuple[float, dict[str, str]]] = []
+        scored_candidates: list[dict[str, object]] = []
         for source in source_goals:
             goal_title = str(source.get("sourceGoalTitle") or "")
             goal_metric = str(source.get("sourceMetric") or "")
             goal_text = f"{goal_title} {goal_metric}".strip()
             if not goal_text:
                 continue
-            score = self._keyword_relevance_score(goal_text, process_names)
-            if score <= 0:
+            keyword_score = self._keyword_relevance_score(goal_text, process_names)
+            business_score = self._business_unit_relevance_score(source, deputy_business_units)
+            source_score = self._source_priority_score(str(source.get("sourceType") or ""))
+            process_explain = self._build_process_match_explanation(goal_text, process_names)
+            rule_score = (0.6 * keyword_score) + (0.3 * business_score) + (0.1 * source_score)
+            if rule_score < 0.12 and keyword_score <= 0 and business_score <= 0:
                 continue
-            scored_candidates.append((score, source))
+            scored_candidates.append(
+                {
+                    "source": source,
+                    "rule_score": rule_score,
+                    "keyword_score": keyword_score,
+                    "business_score": business_score,
+                    "source_score": source_score,
+                    "process_explain": process_explain,
+                }
+            )
 
         if not scored_candidates:
             logger.info(
-                "Relevance filter '%s': no keyword candidates (source_goals=%s, processes=%s)",
+                "Relevance filter '%s': no rule candidates (source_goals=%s, processes=%s, business_units=%s)",
                 subject_name,
                 len(source_goals),
                 len(process_names),
+                len(deputy_business_units),
             )
             return []
 
-        scored_candidates.sort(key=lambda x: x[0], reverse=True)
+        scored_candidates.sort(key=lambda x: float(x["rule_score"]), reverse=True)
         llm_limit = max(1, int(getattr(settings, "cascade_llm_max_candidates_per_deputy", 15)))
         llm_calls = 0
-        llm_cache_hits = 0
 
         llm_bulk_map: dict[int, dict[str, object]] = {}
-        llm_candidates = [source for _, source in scored_candidates[:llm_limit]]
+        llm_candidates = [item["source"] for item in scored_candidates[:llm_limit]]
         if use_llm and llm_candidates:
             llm_calls = 1
             llm_bulk = self.llm.assess_goals_relevance_bulk(
@@ -405,50 +461,94 @@ class CascadeService:
             if isinstance(llm_bulk, dict):
                 llm_bulk_map = llm_bulk
 
-        filtered: list[dict[str, str]] = []
-        for idx, (_score, source) in enumerate(scored_candidates):
+        reranked: list[tuple[float, dict[str, str]]] = []
+        for idx, candidate in enumerate(scored_candidates):
+            source = candidate["source"]
+            rule_score = float(candidate["rule_score"])
+            keyword_score = float(candidate["keyword_score"])
+            business_score = float(candidate["business_score"])
+            source_score = float(candidate["source_score"])
+            process_explain = str(candidate.get("process_explain") or "")
             goal_title = str(source.get("sourceGoalTitle") or "")
             goal_metric = str(source.get("sourceMetric") or "")
 
-            relevant = True  # keyword prefilter уже выполнен выше
             llm_reason = ""
             llm_confidence: Optional[float] = None
+            llm_relevant: Optional[bool] = None
+            final_score = rule_score
             if use_llm and idx < llm_limit:
                 llm_result = llm_bulk_map.get(idx)
                 if llm_result is not None:
-                    relevant = bool(llm_result.get("relevant"))
+                    llm_relevant = bool(llm_result.get("relevant"))
                     llm_reason = str(llm_result.get("reason") or "").strip()
                     confidence_raw = llm_result.get("confidence")
                     try:
                         llm_confidence = float(confidence_raw) if confidence_raw is not None else None
                     except (TypeError, ValueError):
                         llm_confidence = None
-            if not relevant:
+                    if llm_confidence is not None:
+                        llm_delta = (llm_confidence if llm_relevant else -llm_confidence) * 0.35
+                        final_score = max(0.0, min(1.0, rule_score + llm_delta))
+
+            if llm_relevant is False and final_score < 0.18:
                 continue
 
             trace = source.get("traceRule") or ""
+            source_type = str(source.get("sourceType") or "")
+            source_explain = self._source_priority_explanation(source_type)
+            business_explain = self._business_unit_relevance_explanation(source, deputy_business_units)
             if use_llm:
                 if idx < llm_limit:
-                    trace = f"{trace}; relevance: llm+process_registry({subject_name})"
+                    trace = (
+                        f"{trace}; score: rule={rule_score:.3f},final={final_score:.3f},"
+                        f"keyword={keyword_score:.3f},business={business_score:.3f},source={source_score:.3f}; "
+                        f"relevance: llm_rerank+process_registry({subject_name})"
+                    )
+                    if process_explain:
+                        trace = f"{trace}; process_match: {process_explain}"
+                    trace = f"{trace}; business_match: {business_explain}"
+                    trace = f"{trace}; source_reason: {source_explain}"
+                    trace = f"{trace}; classification: process_registry"
+                    if llm_relevant is not None:
+                        trace = f"{trace}; llm_relevant={llm_relevant}"
                     if llm_reason:
                         trace = f"{trace}; reason: {llm_reason}"
                 else:
-                    trace = f"{trace}; relevance: keyword+process_registry({subject_name}); llm: skipped_by_limit"
+                    trace = (
+                        f"{trace}; score: rule={rule_score:.3f},final={final_score:.3f},"
+                        f"keyword={keyword_score:.3f},business={business_score:.3f},source={source_score:.3f}; "
+                        f"relevance: rule_based+process_registry({subject_name}); llm: skipped_by_limit"
+                    )
+                    if process_explain:
+                        trace = f"{trace}; process_match: {process_explain}"
+                    trace = f"{trace}; business_match: {business_explain}"
+                    trace = f"{trace}; source_reason: {source_explain}"
+                    trace = f"{trace}; classification: process_registry"
             else:
-                trace = f"{trace}; relevance: keyword+process_registry({subject_name})"
+                trace = (
+                    f"{trace}; score: rule={rule_score:.3f},final={final_score:.3f},"
+                    f"keyword={keyword_score:.3f},business={business_score:.3f},source={source_score:.3f}; "
+                    f"relevance: rule_based+process_registry({subject_name})"
+                )
+                if process_explain:
+                    trace = f"{trace}; process_match: {process_explain}"
+                trace = f"{trace}; business_match: {business_explain}"
+                trace = f"{trace}; source_reason: {source_explain}"
+                trace = f"{trace}; classification: process_registry"
 
             item = {**source, "traceRule": trace}
-            if llm_confidence is not None:
-                item["confidence"] = str(round(llm_confidence, 4))
-            filtered.append(item)
+            item["confidence"] = str(round(llm_confidence if llm_confidence is not None else final_score, 4))
+            reranked.append((final_score, item))
+
+        reranked.sort(key=lambda x: x[0], reverse=True)
+        filtered = [item for _score, item in reranked]
         logger.info(
-            "Relevance filter '%s': source=%s keyword_candidates=%s filtered=%s llm_calls=%s llm_cache_hits=%s llm_limit=%s elapsed=%.2fs",
+            "Relevance filter '%s': source=%s rule_candidates=%s filtered=%s llm_calls=%s llm_limit=%s elapsed=%.2fs",
             subject_name,
             len(source_goals),
             len(scored_candidates),
             len(filtered),
             llm_calls,
-            llm_cache_hits,
             llm_limit,
             time.perf_counter() - filter_started,
         )
@@ -477,6 +577,102 @@ class CascadeService:
     def _tokenize(self, text: str) -> set[str]:
         parts = re.split(r"[^a-zA-Zа-яА-Я0-9]+", norm_text(text))
         return {part for part in parts if len(part) >= 3}
+
+    def _business_unit_relevance_score(
+        self,
+        source: dict[str, str],
+        deputy_business_units: list[str],
+    ) -> float:
+        if not deputy_business_units:
+            return 0.0
+        source_units = [
+            str(source.get("businessUnit") or "").strip(),
+            str(source.get("department") or "").strip(),
+        ]
+        source_units = [value for value in source_units if value]
+        if not source_units:
+            return 0.0
+
+        deputy_norm = {norm_text(value) for value in deputy_business_units if value}
+        source_norm = {norm_text(value) for value in source_units if value}
+        if deputy_norm.intersection(source_norm):
+            return 1.0
+
+        deputy_tokens: set[str] = set()
+        source_tokens: set[str] = set()
+        for value in deputy_norm:
+            deputy_tokens.update(self._tokenize(value))
+        for value in source_norm:
+            source_tokens.update(self._tokenize(value))
+        overlap = deputy_tokens.intersection(source_tokens)
+        if not overlap:
+            return 0.0
+        return min(0.8, len(overlap) / max(1, len(source_tokens)))
+
+    def _source_priority_score(self, source_type: str) -> float:
+        source = norm_text(source_type)
+        if source == "strategy":
+            return 1.0
+        if source == "board":
+            return 0.75
+        if source == "leader":
+            return 0.65
+        return 0.5
+
+    def _source_priority_explanation(self, source_type: str) -> str:
+        source = norm_text(source_type)
+        if source == "strategy":
+            return "strategy имеет повышенный приоритет (1.00)"
+        if source == "board":
+            return "board имеет высокий приоритет (0.75)"
+        if source == "leader":
+            return "leader имеет базовый приоритет (0.65)"
+        return f"{source_type or 'unknown'} имеет стандартный приоритет (0.50)"
+
+    def _build_process_match_explanation(self, goal_text: str, process_names: list[str]) -> str:
+        goal_tokens = self._tokenize(goal_text)
+        if not goal_tokens or not process_names:
+            return ""
+        best_parts: list[str] = []
+        for process_name in process_names:
+            process_tokens = self._tokenize(process_name)
+            if not process_tokens:
+                continue
+            overlap = goal_tokens.intersection(process_tokens)
+            if not overlap:
+                continue
+            ratio = len(overlap) / max(1, len(process_tokens))
+            overlap_tokens = ",".join(sorted(overlap)[:4])
+            best_parts.append(
+                f"{process_name} (совпадение={ratio:.2f}; токены={overlap_tokens})"
+            )
+        if not best_parts:
+            return "ключевые токены процессов не совпали"
+        return " | ".join(best_parts[:2])
+
+    def _business_unit_relevance_explanation(
+        self,
+        source: dict[str, str],
+        deputy_business_units: list[str],
+    ) -> str:
+        if not deputy_business_units:
+            return "у заместителя не найден бизнес-блок в staff"
+        source_units = [
+            str(source.get("businessUnit") or "").strip(),
+            str(source.get("department") or "").strip(),
+        ]
+        source_units = [value for value in source_units if value]
+        if not source_units:
+            return "в цели не указан businessUnit/department"
+        deputy_norm = {norm_text(value) for value in deputy_business_units if value}
+        source_norm = {norm_text(value) for value in source_units if value}
+        direct = deputy_norm.intersection(source_norm)
+        if direct:
+            return f"прямое совпадение блока/департамента: {', '.join(sorted(direct)[:2])}"
+        return (
+            f"прямого совпадения нет; deputy={', '.join(deputy_business_units[:2])}; "
+            f"source={', '.join(source_units[:2])}"
+        )
 
     def _build_source_goals_for_manager(self, manager_name: str, report_year: str) -> list[dict[str, str]]:
         out: list[dict[str, str]] = []
@@ -524,7 +720,10 @@ class CascadeService:
                 {
                     "sourceType": "strategy",
                     "sourceRowId": row.id,
-                    "sourceGoalTitle": str(row.goal_objective or row.initiative or ""),
+                    "sourceGoalTitle": self._compose_strategy_title(
+                        str(row.goal_objective or ""),
+                        str(row.initiative or ""),
+                    ),
                     "sourceMetric": str(row.kpi or ""),
                     "businessUnit": str(row.business_unit or ""),
                     "department": str(row.segment or ""),
@@ -533,4 +732,182 @@ class CascadeService:
                 }
             )
 
+        return out
+
+    def _build_strategy_goals_for_deputy(
+        self,
+        *,
+        deputy_name: str,
+        report_year: str,
+        use_llm: bool,
+        match_cache: dict[tuple[str, str], tuple[bool, str]],
+    ) -> list[dict[str, str]]:
+        out: list[dict[str, str]] = []
+        year = (report_year or "").strip()
+        for row in self.snapshot.strategy_rows:
+            match_ok, match_trace = self._strategy_executor_matches_deputy(
+                deputy_name=deputy_name,
+                responsible_executor=str(row.responsible_person_owner or ""),
+                goal_title=str(row.goal_objective or ""),
+                initiative=str(row.initiative or ""),
+                use_llm=use_llm,
+                cache=match_cache,
+            )
+            if not match_ok:
+                continue
+            out.append(
+                {
+                    "sourceType": "strategy",
+                    "sourceRowId": row.id,
+                    "sourceGoalTitle": self._compose_strategy_title(
+                        str(row.goal_objective or ""),
+                        str(row.initiative or ""),
+                    ),
+                    "sourceMetric": str(row.kpi or ""),
+                    "businessUnit": str(row.business_unit or ""),
+                    "department": str(row.segment or ""),
+                    "reportYear": year,
+                    "traceRule": (
+                        "match: strategy_goals.responsible_person_owner ~= deputy; "
+                        f"{match_trace}; classification: strategy"
+                    ),
+                }
+            )
+        return out
+
+    def _strategy_executor_matches_deputy(
+        self,
+        *,
+        deputy_name: str,
+        responsible_executor: str,
+        goal_title: str,
+        initiative: str,
+        use_llm: bool,
+        cache: dict[tuple[str, str], tuple[bool, str]],
+    ) -> tuple[bool, str]:
+        deputy = str(deputy_name or "").strip()
+        executor_raw = str(responsible_executor or "").strip()
+        if not deputy or not executor_raw:
+            return False, "responsible_empty"
+
+        if names_match(executor_raw, deputy):
+            return True, "responsible: direct_name_match"
+
+        candidates = self._extract_possible_person_names(executor_raw)
+        if any(names_match(candidate, deputy) for candidate in candidates):
+            return True, "responsible: parsed_name_match"
+
+        key = (norm_text(executor_raw), normalize_name(deputy))
+        if key in cache:
+            cached_ok, cached_trace = cache[key]
+            return cached_ok, cached_trace
+
+        if not use_llm:
+            cache[key] = (False, "responsible: llm_disabled")
+            return False, "responsible: llm_disabled"
+
+        deputy_tokens = [token for token in self._name_tokens(deputy) if len(token) >= 4]
+        executor_norm = norm_text(executor_raw)
+        if deputy_tokens and not any(token in executor_norm for token in deputy_tokens):
+            cache[key] = (False, "responsible: token_prefilter_no_match")
+            return False, "responsible: token_prefilter_no_match"
+
+        llm_match = self.llm.assess_responsible_executor_match(
+            deputy_name=deputy,
+            responsible_executor=executor_raw,
+            goal_title=goal_title,
+            initiative=initiative,
+            force=True,
+        )
+        if not llm_match:
+            cache[key] = (False, "responsible: llm_empty")
+            return False, "responsible: llm_empty"
+
+        is_match = bool(llm_match.get("match"))
+        reason = str(llm_match.get("reason") or "").strip()
+        trace = "responsible: llm_match"
+        if reason:
+            trace = f"{trace}; reason: {reason}"
+        cache[key] = (is_match, trace if is_match else "responsible: llm_no_match")
+        return cache[key]
+
+    def _extract_possible_person_names(self, text: str) -> list[str]:
+        raw = str(text or "")
+        candidates: list[str] = []
+
+        in_brackets = re.findall(r"\(([^()]*)\)", raw)
+        chunks = [raw, *in_brackets]
+        splitter = re.compile(r"[,;/|]| и |\\n", flags=re.IGNORECASE)
+        for chunk in chunks:
+            for part in splitter.split(chunk):
+                part = part.strip()
+                if not part:
+                    continue
+                if re.search(r"[А-ЯЁ][а-яё-]+\s+[А-ЯЁ]\.[А-ЯЁ]\.", part):
+                    candidates.append(part)
+                elif re.search(r"[А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+)?", part):
+                    candidates.append(part)
+
+        unique: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            key = normalize_name(candidate)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            unique.append(candidate)
+        return unique
+
+    def _name_tokens(self, text: str) -> list[str]:
+        return [token for token in re.split(r"[^a-zA-Zа-яА-Я0-9]+", norm_text(text)) if token]
+
+    def _compose_strategy_title(self, goal_objective: str, initiative: str) -> str:
+        goal = str(goal_objective or "").strip()
+        init = str(initiative or "").strip()
+        if goal and init:
+            return f"{goal}. Инициатива: {init}"
+        return goal or init
+
+    def _merge_goal_candidates(
+        self,
+        primary: list[dict[str, str]],
+        secondary: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        out: list[dict[str, str]] = []
+        seen_index: dict[tuple[str, str, str, str], int] = {}
+        for source in [*primary, *secondary]:
+            key = (
+                str(source.get("sourceType") or ""),
+                str(source.get("sourceRowId") or ""),
+                norm_text(str(source.get("sourceGoalTitle") or "")),
+                norm_text(str(source.get("sourceMetric") or "")),
+            )
+            if key in seen_index:
+                idx = seen_index[key]
+                existing_trace = str(out[idx].get("traceRule") or "")
+                incoming_trace = str(source.get("traceRule") or "")
+                has_process = (
+                    "classification: process_registry" in existing_trace
+                    or "classification: process_registry" in incoming_trace
+                    or "classification: strategy+process_registry" in existing_trace
+                    or "classification: strategy+process_registry" in incoming_trace
+                )
+                has_strategy = (
+                    "classification: strategy" in existing_trace
+                    or "classification: strategy" in incoming_trace
+                    or "classification: strategy+process_registry" in existing_trace
+                    or "classification: strategy+process_registry" in incoming_trace
+                )
+                if has_process and has_strategy and "classification: strategy+process_registry" not in existing_trace:
+                    updated_trace = existing_trace.replace(
+                        "classification: process_registry",
+                        "classification: strategy+process_registry",
+                    ).replace(
+                        "classification: strategy",
+                        "classification: strategy+process_registry",
+                    )
+                    out[idx]["traceRule"] = updated_trace
+                continue
+            seen_index[key] = len(out)
+            out.append(source)
         return out

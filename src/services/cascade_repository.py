@@ -54,6 +54,7 @@ class CascadeRepository:
         *,
         report_year: str,
         managers: list[str],
+        use_llm: bool,
         status: str,
         warnings: list[str],
         unmatched: list[dict[str, str]],
@@ -67,7 +68,7 @@ class CascadeRepository:
             created_at=datetime.now(timezone.utc).isoformat(),
             status=status,
             report_year=report_year,
-            managers_filter=json.dumps(managers, ensure_ascii=False),
+            managers_filter=json.dumps({"managers": managers, "useLlm": bool(use_llm)}, ensure_ascii=False),
             total_managers=total_managers,
             total_deputies=total_deputies,
             total_items=len(items),
@@ -110,3 +111,12 @@ class CascadeRepository:
 
     def get_run_items(self, run_id: str) -> list[CascadeRunItem]:
         return self.db.query(CascadeRunItem).filter(CascadeRunItem.run_id == run_id).order_by(CascadeRunItem.id).all()
+
+    def delete_run(self, run_id: str) -> bool:
+        row = self.get_run(run_id)
+        if not row:
+            return False
+        self.db.query(CascadeRunItem).filter(CascadeRunItem.run_id == run_id).delete()
+        self.db.delete(row)
+        self.db.commit()
+        return True
