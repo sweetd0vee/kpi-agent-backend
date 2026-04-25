@@ -143,6 +143,7 @@ class CascadeService:
                     person_to_business_units,
                     deputy_name,
                 )
+                llm_rejections: list[str] = []
                 if not deputy_processes:
                     reason = f"Для заместителя '{deputy_name}' не найдены процессы в реестре процессов."
                     logger.info(
@@ -174,7 +175,17 @@ class CascadeService:
                     deputy_business_units=deputy_business_units,
                     source_goals=source_goals,
                     use_llm=use_llm,
+                    llm_rejections_out=llm_rejections,
                 )
+                if llm_rejections:
+                    for rejection in llm_rejections:
+                        unmatched.append(
+                            {
+                                "managerName": manager_name,
+                                "reason": f"Заместитель '{deputy_name}': {rejection}",
+                                "reportYear": report_year,
+                            }
+                        )
                 strategy_direct_goals = self._build_strategy_goals_for_deputy(
                     deputy_name=deputy_name,
                     report_year=report_year,
@@ -407,6 +418,7 @@ class CascadeService:
         deputy_business_units: list[str],
         source_goals: list[dict[str, str]],
         use_llm: bool,
+        llm_rejections_out: Optional[list[str]] = None,
     ) -> list[dict[str, str]]:
         filter_started = time.perf_counter()
         scored_candidates: list[dict[str, object]] = []
@@ -490,7 +502,14 @@ class CascadeService:
                         llm_delta = (llm_confidence if llm_relevant else -llm_confidence) * 0.35
                         final_score = max(0.0, min(1.0, rule_score + llm_delta))
 
-            if llm_relevant is False and final_score < 0.18:
+            if llm_relevant is False:
+                rejection_reason = (
+                    f"llm_relevant=False; goal='{goal_title[:120]}'; "
+                    f"reason: {llm_reason or 'Судья отметил цель как нерелевантную'}"
+                )
+                if llm_rejections_out is not None:
+                    llm_rejections_out.append(rejection_reason)
+                logger.info("Relevance filter '%s': %s", subject_name, rejection_reason)
                 continue
 
             trace = source.get("traceRule") or ""
