@@ -192,6 +192,25 @@ class CascadeService:
                     use_llm=use_llm,
                     match_cache=strategy_executor_match_cache,
                 )
+                if use_llm and strategy_direct_goals:
+                    strategy_llm_rejections: list[str] = []
+                    strategy_direct_goals = self._filter_goals_by_process_relevance(
+                        subject_name=deputy_name,
+                        process_names=deputy_processes,
+                        deputy_business_units=deputy_business_units,
+                        source_goals=strategy_direct_goals,
+                        use_llm=True,
+                        llm_rejections_out=strategy_llm_rejections,
+                    )
+                    if strategy_llm_rejections:
+                        for rejection in strategy_llm_rejections:
+                            unmatched.append(
+                                {
+                                    "managerName": manager_name,
+                                    "reason": f"Заместитель '{deputy_name}' (strategy): {rejection}",
+                                    "reportYear": report_year,
+                                }
+                            )
                 deputy_goals = self._merge_goal_candidates(deputy_goals, strategy_direct_goals)
                 if not deputy_goals:
                     reason = (
@@ -433,7 +452,9 @@ class CascadeService:
             source_score = self._source_priority_score(str(source.get("sourceType") or ""))
             process_explain = self._build_process_match_explanation(goal_text, process_names)
             rule_score = (0.6 * keyword_score) + (0.3 * business_score) + (0.1 * source_score)
-            if rule_score < 0.12 and keyword_score <= 0 and business_score <= 0:
+            source_type = norm_text(source.get("sourceType") or "")
+            allow_strategy_llm_check = use_llm and source_type == "strategy"
+            if rule_score < 0.12 and keyword_score <= 0 and business_score <= 0 and not allow_strategy_llm_check:
                 continue
             scored_candidates.append(
                 {
