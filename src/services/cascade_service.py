@@ -134,13 +134,6 @@ class CascadeService:
             if not deputies:
                 reason = "В staff не найдены подчиненные по полю functionalBlockCurator."
                 logger.info("Manager '%s': no deputies found in staff", manager_name)
-                unmatched.append(
-                    {
-                        "managerName": manager_name,
-                        "reason": reason,
-                        "reportYear": report_year,
-                    }
-                )
                 self._append_fallback_goals_for_manager(
                     manager_name=manager_name,
                     deputy_name="",
@@ -154,13 +147,6 @@ class CascadeService:
                 continue
             if not source_goals:
                 logger.info("Manager '%s': no source goals found", manager_name)
-                unmatched.append(
-                    {
-                        "managerName": manager_name,
-                        "reason": "Не найдены цели в таблице board_goals для выбранного руководителя.",
-                        "reportYear": report_year,
-                    }
-                )
                 continue
             manager_items_before = len(items)
             logger.info(
@@ -180,16 +166,27 @@ class CascadeService:
                 deputy_processes_map[deputy_name] = deputy_processes
                 deputy_business_units_map[deputy_name] = deputy_business_units
                 llm_rejections: list[str] = []
-                if not deputy_processes:
-                    reason = f"Для заместителя '{deputy_name}' не найдены процессы в реестре процессов."
+                strategy_direct_goals = self._build_strategy_goals_for_deputy(
+                    deputy_name=deputy_name,
+                    report_year=report_year,
+                    use_llm=use_llm,
+                    match_cache=strategy_executor_match_cache,
+                )
+                deputy_strategy_goals_map[deputy_name] = strategy_direct_goals
+                if not deputy_processes and not strategy_direct_goals:
+                    reason = (
+                        f"Для заместителя '{deputy_name}' не найдены процессы "
+                        "в реестре процессов и цели в стратегии."
+                    )
                     logger.info(
-                        "Manager '%s' deputy '%s': no processes in registry",
+                        "Manager '%s' deputy '%s': no processes and no strategy goals",
                         manager_name,
                         deputy_name,
                     )
                     unmatched.append(
                         {
                             "managerName": manager_name,
+                            "deputyName": deputy_name,
                             "reason": reason,
                             "reportYear": report_year,
                         }
@@ -214,22 +211,6 @@ class CascadeService:
                     use_llm=use_llm,
                     llm_rejections_out=llm_rejections,
                 )
-                if llm_rejections:
-                    for rejection in llm_rejections:
-                        unmatched.append(
-                            {
-                                "managerName": manager_name,
-                                "reason": f"Заместитель '{deputy_name}': {rejection}",
-                                "reportYear": report_year,
-                            }
-                        )
-                strategy_direct_goals = self._build_strategy_goals_for_deputy(
-                    deputy_name=deputy_name,
-                    report_year=report_year,
-                    use_llm=use_llm,
-                    match_cache=strategy_executor_match_cache,
-                )
-                deputy_strategy_goals_map[deputy_name] = strategy_direct_goals
                 if use_llm and strategy_direct_goals:
                     strategy_llm_rejections: list[str] = []
                     strategy_direct_goals = self._filter_goals_by_process_relevance(
@@ -240,20 +221,10 @@ class CascadeService:
                         use_llm=True,
                         llm_rejections_out=strategy_llm_rejections,
                     )
-                    if strategy_llm_rejections:
-                        for rejection in strategy_llm_rejections:
-                            unmatched.append(
-                                {
-                                    "managerName": manager_name,
-                                    "reason": f"Заместитель '{deputy_name}' (strategy): {rejection}",
-                                    "reportYear": report_year,
-                                }
-                            )
                 deputy_goals = self._merge_goal_candidates(deputy_goals, strategy_direct_goals)
                 if not deputy_goals:
                     reason = (
-                        f"Для заместителя '{deputy_name}' не найдено релевантных целей "
-                        "ни по процессам, ни по таблице стратегии."
+                        "Не нашлось ни в реестре процессов, ни в стратегии."
                     )
                     logger.info(
                         "Manager '%s' deputy '%s': no relevant goals after filtering (processes=%s, strategy_direct=%s)",
@@ -261,13 +232,6 @@ class CascadeService:
                         deputy_name,
                         len(deputy_processes),
                         len(strategy_direct_goals),
-                    )
-                    unmatched.append(
-                        {
-                            "managerName": manager_name,
-                            "reason": reason,
-                            "reportYear": report_year,
-                        }
                     )
                     append_not_found_item(deputy_name, reason)
                     self._append_fallback_goals_for_manager(
@@ -326,7 +290,12 @@ class CascadeService:
                             "businessUnit": source["businessUnit"],
                             "department": source["department"],
                             "reportYear": source["reportYear"] or report_year,
-                            "traceRule": source["traceRule"],
+                            "traceRule": self._build_readable_trace(
+                                manager_name=manager_name,
+                                deputy_name=deputy_name,
+                                source_type=source_type,
+                                source_trace=str(source.get("traceRule") or ""),
+                            ),
                             "confidence": (
                                 float(source["confidence"])
                                 if source.get("confidence") not in (None, "")
@@ -335,9 +304,8 @@ class CascadeService:
                         }
                     )
 
-            # Для каждой цели правления назначаем хотя бы одного заместителя.
-            # Если цель не попала в релевантные для замов, назначаем лучшему кандидату
-            # по score на базе process_registry + strategy.
+            # Нераспределенные board-цели показываем в итоговой таблице как цели
+            # без назначения на заместителя (deputyName пустой).
             for source in source_goals:
                 source_type = str(source.get("sourceType") or "")
                 source_row_id = str(source.get("sourceRowId") or "")
@@ -351,43 +319,38 @@ class CascadeService:
                 )
                 if goal_key in assigned_goal_keys_for_manager:
                     continue
-                candidate_deputies = self._pick_candidate_deputies_for_goal(
-                    source=source,
-                    deputies=deputies,
-                    deputy_processes_map=deputy_processes_map,
-                    deputy_business_units_map=deputy_business_units_map,
-                    deputy_strategy_goals_map=deputy_strategy_goals_map,
+                unique_key = (
+                    normalize_name(manager_name),
+                    "",
+                    source_type or "unassigned",
+                    source_row_id,
+                    norm_text(source_goal_title),
+                    norm_text(source_metric),
                 )
-                if not candidate_deputies:
+                if unique_key in item_seen:
                     continue
-                for candidate_deputy, candidate_trace in candidate_deputies:
-                    unique_key = (
-                        normalize_name(manager_name),
-                        normalize_name(candidate_deputy),
-                        source_type or "board",
-                        source_row_id,
-                        norm_text(source_goal_title),
-                        norm_text(source_metric),
-                    )
-                    if unique_key in item_seen:
-                        continue
-                    item_seen.add(unique_key)
-                    items.append(
-                        {
-                            "id": str(uuid.uuid4()),
-                            "managerName": manager_name,
-                            "deputyName": candidate_deputy,
-                            "sourceType": source_type or "board",
-                            "sourceRowId": source_row_id,
-                            "sourceGoalTitle": source_goal_title or "KPI не найдено",
-                            "sourceMetric": source_metric,
-                            "businessUnit": str(source.get("businessUnit") or ""),
-                            "department": str(source.get("department") or ""),
-                            "reportYear": str(source.get("reportYear") or report_year),
-                            "traceRule": candidate_trace,
-                            "confidence": None,
-                        }
-                    )
+                item_seen.add(unique_key)
+                items.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "managerName": manager_name,
+                        "deputyName": "",
+                        "sourceType": source_type or "unassigned",
+                        "sourceRowId": source_row_id,
+                        "sourceGoalTitle": source_goal_title or "KPI не найдено",
+                        "sourceMetric": source_metric,
+                        "businessUnit": str(source.get("businessUnit") or ""),
+                        "department": str(source.get("department") or ""),
+                        "reportYear": str(source.get("reportYear") or report_year),
+                        "traceRule": self._build_readable_trace(
+                            manager_name=manager_name,
+                            deputy_name="—",
+                            source_type=source_type or "unassigned",
+                            source_trace="Цель не была сопоставлена ни одному заместителю.",
+                        ),
+                        "confidence": None,
+                    }
+                )
             logger.info(
                 "Manager '%s': finished in %.2fs, items_added=%s",
                 manager_name,
@@ -838,62 +801,22 @@ class CascadeService:
 
         return out
 
-    def _pick_candidate_deputies_for_goal(
+    def _build_readable_trace(
         self,
         *,
-        source: dict[str, str],
-        deputies: list[str],
-        deputy_processes_map: dict[str, list[str]],
-        deputy_business_units_map: dict[str, list[str]],
-        deputy_strategy_goals_map: dict[str, list[dict[str, str]]],
-    ) -> list[tuple[str, str]]:
-        scored: list[tuple[str, float, str]] = []
-        goal_title = str(source.get("sourceGoalTitle") or "")
-        goal_metric = str(source.get("sourceMetric") or "")
-        goal_text = f"{goal_title} {goal_metric}".strip()
-        for deputy_name in deputies:
-            process_names = deputy_processes_map.get(deputy_name, [])
-            business_units = deputy_business_units_map.get(deputy_name, [])
-            strategy_goals = deputy_strategy_goals_map.get(deputy_name, [])
-
-            process_score = self._keyword_relevance_score(goal_text, process_names)
-            business_score = self._business_unit_relevance_score(source, business_units)
-            strategy_score = 0.0
-            for strategy_goal in strategy_goals:
-                strategy_text = (
-                    f"{strategy_goal.get('sourceGoalTitle') or ''} "
-                    f"{strategy_goal.get('sourceMetric') or ''}"
-                ).strip()
-                if not strategy_text:
-                    continue
-                strategy_score = max(strategy_score, self._keyword_relevance_score(goal_text, [strategy_text]))
-
-            total_score = (0.5 * process_score) + (0.25 * business_score) + (0.25 * strategy_score)
-            trace = (
-                f"fallback_assign: board_goal_auto_match; score={total_score:.3f}; "
-                f"process={process_score:.3f}; business={business_score:.3f}; "
-                f"strategy={strategy_score:.3f}; classification: strategy+process_registry"
-            )
-            scored.append((deputy_name, total_score, trace))
-
-        if not scored:
-            return []
-
-        scored.sort(key=lambda item: item[1], reverse=True)
-        best_score = scored[0][1]
-        # Разрешаем назначать одну цель нескольким заместителям, если они близки по релевантности.
-        # Берем всех с положительным score и не хуже 85% от лучшего.
-        threshold = best_score * 0.85 if best_score > 0 else best_score
-        selected = [
-            (deputy_name, trace)
-            for deputy_name, score, trace in scored
-            if score > 0 and score >= threshold
-        ]
-        if selected:
-            return selected
-        # Если все score нулевые, оставляем одного лучшего как fallback.
-        deputy_name, _score, trace = scored[0]
-        return [(deputy_name, trace)]
+        manager_name: str,
+        deputy_name: str,
+        source_type: str,
+        source_trace: str,
+    ) -> str:
+        readable = (
+            f"Назначено от руководителя '{manager_name}' заместителю '{deputy_name}'. "
+            f"Источник цели: '{source_type or 'unknown'}'."
+        )
+        trace = str(source_trace or "").strip()
+        if not trace:
+            return readable
+        return f"{readable} {trace}"
 
     def _build_strategy_goals_for_deputy(
         self,
@@ -906,9 +829,10 @@ class CascadeService:
         out: list[dict[str, str]] = []
         year = (report_year or "").strip()
         for row in self.snapshot.strategy_rows:
+            responsible_executor = str(row.responsible_person_owner or "")
             match_ok, match_trace = self._strategy_executor_matches_deputy(
                 deputy_name=deputy_name,
-                responsible_executor=str(row.responsible_person_owner or ""),
+                responsible_executor=responsible_executor,
                 goal_title=str(row.goal_objective or ""),
                 initiative=str(row.initiative or ""),
                 use_llm=use_llm,
@@ -930,7 +854,10 @@ class CascadeService:
                     "reportYear": year,
                     "traceRule": (
                         "match: strategy_goals.responsible_person_owner ~= deputy; "
-                        f"{match_trace}; classification: strategy"
+                        f"responsible_executor='{responsible_executor}'; deputy='{deputy_name}'; "
+                        f"{match_trace}; "
+                        f"strategy_context: segment='{str(row.segment or '')}', initiative_type='{str(row.initiative_type or '')}'; "
+                        "classification: strategy"
                     ),
                 }
             )

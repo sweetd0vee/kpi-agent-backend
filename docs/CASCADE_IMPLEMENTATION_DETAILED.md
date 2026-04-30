@@ -1,412 +1,284 @@
-# Подробная реализация каскадирования (backend)
+# CASCADE: Актуальная реализация (backend)
 
-Документ описывает, как устроено каскадирование целей в `kpi-agent-backend`, на уровне сервисов и таблиц БД:
+Документ описывает **текущую** (актуальную) реализацию каскадирования в backend:
+
+- как формируется итоговая таблица;
+- какие данные используются;
+- какие правила и fallback срабатывают;
+- какие LLM-промпты применяются.
+
+Основные файлы реализации:
 
 - `src/services/cascade_service.py`
 - `src/services/cascade_repository.py`
 - `src/services/cascade_llm.py`
-- `src/db/models.py`
+- `src/api/routes/cascade.py`
+- `src/models/cascade.py`
 
 ---
 
-## 1. Общая идея алгоритма
+## 1) Что является источником целей
 
-Цель алгоритма: для выбранного руководителя(ей) и отчетного года найти релевантные KPI/цели для его заместителей.
+В текущей логике базовый источник каскадируемых целей:
 
-Входные данные берутся из пяти таблиц:
+- **`board_goals`** (строки конкретного `report_year` и конкретного manager по `last_name`).
 
-1. `board_goals` — основной пул целей для каскадирования в выбранный отчетный год.
-2. `strategy_goals` — стратегический контекст и direct-цели по ответственному исполнителю.
-3. `staff` — оргструктура (кто чей куратор/руководитель).
-4. `process_registry` — реестр процессов, к которым привязан сотрудник/руководитель.
-5. `leader_goals` — присутствует в snapshot, но в текущей логике каскада не используется как источник целей.
+Таблица `strategy_goals` используется не как базовый пул board-целей, а как:
 
-Результат разделен на три массива:
+1. источник direct-целей для конкретного заместителя (match по `responsible_person_owner`);
+2. дополнительный сигнал релевантности для назначения целей заместителю (direct strategy goals).
 
-- `items` — каскадированные строки (включая специальные строки "не найдено").
-- `unmatched` — причины, почему не удалось сопоставить/распределить.
-- `fallback_goals` — резервные цели для несопоставленных случаев.
+Таблица `leader_goals` в snapshot загружается, но в текущей версии каскадирования как источник `items` не используется.
 
 ---
 
-## 2. Какие сервисы за что отвечают
+## 2) Какие таблицы участвуют в расчете
 
-## `CascadeRepository` (`src/services/cascade_repository.py`)
+`CascadeRepository.load_snapshot(report_year)` загружает:
 
-Задача репозитория:
-
-- загрузить срез данных для расчета (`load_snapshot`);
-- сохранить и читать историю запусков (`save_run`, `list_runs`, `get_run`, `get_run_items`);
-- удалить запуск истории (`delete_run`).
-
-`load_snapshot(report_year)`:
-
-- фильтрует по году `board_goals` и `leader_goals` (leader сейчас не участвует в каскаде, но остается в snapshot);
-- `strategy_goals`, `staff`, `process_registry` загружаются целиком;
-- возвращает `CascadeSnapshot`.
-
-## `CascadeService` (`src/services/cascade_service.py`)
-
-Главная бизнес-логика:
-
-- строит дерево manager -> deputy из `staff`;
-- собирает пул целей руководителя;
-- фильтрует цели по процессам/бизнес-блоку;
-- выполняет LLM rerank (если включено);
-- добавляет цели стратегии для заместителя;
-- выполняет merge + dedup;
-- формирует `items`, `unmatched`, `fallback_goals`.
-
-## `CascadeLlmAdapter` (`src/services/cascade_llm.py`)
-
-Изолированный адаптер LLM:
-
-- `assess_goals_relevance_bulk` — bulk judge релевантности целей процессам;
-- `assess_goal_relevance` — одиночная версия (в текущем пайплайне почти не используется);
-- `assess_responsible_executor_match` — сопоставление ФИО зама с полем `responsible_executor` стратегии.
-
-Поддерживает:
-
-- primary model (`cascade_llm_judge_model`);
-- fallback model (`cascade_llm_fallback_model`);
-- timeout (`cascade_llm_timeout_sec`);
-- жесткий JSON-parsing ответа.
+- `board_goals` (с фильтром по `report_year`);
+- `leader_goals` (с фильтром по `report_year`, сейчас не используется в каскаде);
+- `strategy_goals` (целиком);
+- `staff` (целиком);
+- `process_registry` (целиком).
 
 ---
 
-## 3. Нормализация имен и текстов
+## 3) Выходные блоки результата
 
-Ключевые утилиты в `cascade_service.py`:
+`POST /api/cascade/run` возвращает `CascadeRunResponse`:
 
-- `norm_text(...)`:
-  - lowercase;
-  - `ё -> е`;
-  - схлопывание пробелов.
-- `normalize_name(...)`:
-  - `norm_text`;
-  - удаление пунктуации/символов;
-  - оставляет буквы/цифры/пробел.
-- `names_match(left, right)`:
-  - exact normalized match;
-  - либо включение длинной строки в другую (>= 6 символов), чтобы переживать форматы вроде `Иванов И.И.` vs `Иванов`.
+- `items` — итоговые каскадированные строки;
+- `unmatched` — строго ограниченные несопоставленные кейсы (см. раздел 7);
+- `fallbackGoals` — резервные цели (отдельный набор).
 
-Зачем это важно:
+История запусков хранится в:
 
-- в исходных таблицах ФИО часто в разных форматах;
-- без нормализации резко растет количество ложных unmatched.
+- `cascade_runs`;
+- `cascade_run_items`.
 
 ---
 
-## 4. Колонки таблиц и как они используются в каскадировании
+## 4) Основной алгоритм `CascadeService.run(...)`
 
-Ниже перечислены поля именно с точки зрения алгоритма каскадирования.
+## 4.1 Подготовка
 
-## 4.1 `leader_goals` (`LeaderGoalRow`)
+Перед циклом:
 
-Ключевые колонки:
+- строится `manager_to_deputies` из `staff`:
+  - `manager = functional_block_curator`,
+  - `deputy = head`;
+- строится `person_to_processes` из `process_registry`:
+  - `leader -> [process, ...]`;
+- строится `person_to_business_units` из `staff`:
+  - `head -> [business_unit, unit_name, ...]`.
 
-- `id` — первичный ключ строки.
-- `last_name` — ФИО/фамилия руководителя; используется для матчинга с выбранным manager.
-- `name` — текст цели.
-- `year_value` — годовая метрика цели.
-- `report_year` — фильтр по отчетному году.
+## 4.2 Для каждого manager
 
-Как используется:
+1. `source_goals = _build_source_goals_for_manager(manager, report_year)`  
+   Сейчас это только `board_goals` по manager+year.
 
-- в текущей версии каскадирования **не используется** как источник `source_goals`;
-- хранится в БД и snapshot для совместимости и возможного будущего расширения.
+2. Берется список его `deputies`.
 
-## 4.2 `board_goals` (`BoardGoalRow`)
+3. Для каждого deputy:
+   - собираются процессы (`_get_processes_for_person`);
+   - собираются блоки/подразделения (`_get_business_units_for_person`);
+   - собираются direct strategy goals (`_build_strategy_goals_for_deputy`).
 
-Ключевые колонки:
+4. Проверка “жесткого unmatched”:
+   - если **нет процессов** И **нет strategy goals**, тогда запись уходит в `unmatched`
+     с причиной:
+     - `Не найдены процессы в реестре процессов и цели в стратегии.`
 
-- `id`
-- `last_name` — ФИО/фамилия руководителя.
-- `goal` — цель правления.
-- `metric_goals` — метрика.
-- `business_unit`
-- `department`
-- `report_year`
-
-Как используется (основной источник):
-
-- в пул `source_goals` руководителя (только строки выбранного `report_year` и manager):
-  - `sourceType = board`
-  - `sourceGoalTitle = goal`
-  - `sourceMetric = metric_goals`
-  - `businessUnit = business_unit`
-  - `department = department`
-  - `traceRule = match: board_goals.last_name == manager`
-
-## 4.3 `strategy_goals` (`StrategyGoalRow`)
-
-Ключевые колонки:
-
-- `id`
-- `business_unit`
-- `segment`
-- `goal_objective`
-- `initiative`
-- `responsible_person_owner`
-- `kpi`
-- `target_value_2025/2026/2027`
-- `start_date`, `end_date` (для дашбордов, не для match в каскаде).
-
-Как используется:
-
-### A) как direct цели заместителя:
-
-- `_build_strategy_goals_for_deputy(...)` проверяет соответствие `responsible_person_owner` и `deputy_name`;
-- сначала rule-based сопоставление ФИО, затем (опционально) LLM.
-
-### B) как контекст для fallback-назначения board-целей:
-
-- при невозможности назначить board-цель обычным способом для замов,
-  стратегия используется в `_pick_candidate_deputies_for_goal(...)`;
-- считается `strategy_score` — схожесть board-цели с direct strategy goals заместителя;
-- итоговый fallback-score учитывает `process + business + strategy`.
-
-## 4.4 `staff` (`StaffRow`)
-
-Ключевые колонки:
-
-- `head` — руководитель подразделения (в текущей логике трактуется как кандидат deputy).
-- `functional_block_curator` — куратор функционального блока (manager).
-- `business_unit`
-- `unit_name`
-
-Как используется:
-
-- строится граф `manager -> deputies` из пары:
-  - `manager = functional_block_curator`
-  - `deputy = head`
-- из `head` собирается карта бизнес-блоков сотрудника:
-  - `business_unit`, `unit_name`.
-
-## 4.5 `process_registry` (`ProcessRegistryRow`)
-
-Ключевые колонки:
-
-- `leader` — ФИО сотрудника/руководителя для связки;
-- `process` — название процесса;
-- `business_unit` — справочно.
-
-Как используется:
-
-- для каждого deputy ищутся процессы через `leader ~= deputy`;
-- эти процессы участвуют в keyword-score и в LLM judge prompt.
-
-## 4.6 История запусков: `cascade_runs`, `cascade_run_items`
-
-### `cascade_runs` (`CascadeRun`)
-
-- `id` — run id;
-- `created_at`, `status`;
-- `report_year`;
-- `managers_filter` (JSON: managers + useLlm);
-- `total_managers`, `total_deputies`, `total_items`, `unmatched_count`;
-- `warnings_json`, `unmatched_json`.
-
-### `cascade_run_items` (`CascadeRunItem`)
-
-Снимок итоговой таблицы `items`:
-
-- `manager_name`, `deputy_name`;
-- `source_type`, `source_row_id`;
-- `source_goal_title`, `source_metric`;
-- `business_unit`, `department`, `report_year`;
-- `trace_rule`, `confidence`.
-
----
-
-## 5. Пошаговый flow `CascadeService.run(...)`
-
-## Шаг 1: подготовка словарей
-
-Создаются:
-
-- `manager_to_deputies` из `staff`;
-- `person_to_processes` из `process_registry`;
-- `person_to_business_units` из `staff`.
-
-## Шаг 2: выбор менеджеров
-
-- если `managers` передан в запросе — берется этот список;
-- иначе берутся все ключи из `manager_to_deputies`.
-
-## Шаг 3: обработка каждого manager
-
-1. `source_goals = _build_source_goals_for_manager(...)`.
-2. `deputies = manager_to_deputies[manager]`.
-
-Ветки:
-
-- если нет заместителей:
-  - запись в `unmatched`;
-  - формирование `fallback_goals`;
-  - переход к следующему manager.
-- если нет source_goals:
-  - запись в `unmatched`;
-  - переход к следующему manager.
-
-## Шаг 4: обработка каждого deputy
-
-Для каждого зама:
-
-1. Ищутся процессы (`_get_processes_for_person`) и бизнес-блоки (`_get_business_units_for_person`).
-2. Если процессов нет:
-   - `unmatched` + спец-строка `not_found` в `items` + fallback.
-3. Иначе:
-   - фильтрация `source_goals` через `_filter_goals_by_process_relevance`.
-   - сбор direct strategy goals (`_build_strategy_goals_for_deputy`).
-   - если `use_llm=true`, direct strategy goals тоже проходят `_filter_goals_by_process_relevance`.
-   - merge двух наборов (`_merge_goal_candidates`).
-4. Если итог пустой:
-   - `unmatched` + спец-строка `not_found` + fallback.
 5. Иначе:
-   - добавление строк в `items` с dedup по стабильному ключу.
+   - board-кандидаты проходят `_filter_goals_by_process_relevance(...)`;
+   - при `use_llm=true` strategy direct-goals также проходят эту фильтрацию;
+   - два набора объединяются через `_merge_goal_candidates(...)`;
+   - результат добавляется в `items`.
 
-## Шаг 5: fallback-назначение каждой board-цели
+6. После обработки всех deputy:
+   - если часть board-целей никому не назначилась, они добавляются в итоговую таблицу
+     как неназначенные строки с пустым `deputyName` (в UI отображается `—`).
 
-После прохода всех замов для manager:
+## 4.3 Как обрабатываются нераспределенные board-цели
 
-- берутся `source_goals` (board), которые еще не были назначены никому;
-- для каждой такой цели вызывается `_pick_candidate_deputies_for_goal(...)`;
-- цель назначается одному или нескольким заместителям:
-  - всем кандидатам с положительным score и не ниже 85% от лучшего;
-  - если у всех score нулевой — назначается один лучший fallback-кандидат.
+Текущая логика:
 
-Итог: каждая цель правления за выбранный год получает хотя бы одного заместителя.
+- сначала цель пытается назначиться через основной фильтр (process_registry + strategy);
+- если не назначилась никому, она все равно попадает в `items` как неназначенная строка;
+- в такой строке `deputyName` пустой (в UI это `—`).
 
 ---
 
-## 6. Как работает фильтрация релевантности
+## 5) Фильтрация релевантности (`_filter_goals_by_process_relevance`)
 
-Функция: `_filter_goals_by_process_relevance(...)`.
+## 5.1 Rule-based score
 
-## 6.1 Rule-based этап
+Для кандидата считаются:
 
-Для каждой цели считаются:
-
-- `keyword_score` — overlap токенов goal/metric и process name;
-- `business_score` — совпадение business/dept источника с блоком deputy;
-- `source_score` — вес источника (`strategy=1.0`, `board=0.75`, `leader=0.65`, иначе `0.5`).
+- `keyword_score` — пересечение токенов goal/metric с токенами процессов;
+- `business_score` — совпадение business/dept цели с блоком deputy;
+- `source_score` — приоритет источника (`strategy > board > leader`).
 
 Формула:
 
-`rule_score = 0.6 * keyword + 0.3 * business + 0.1 * source`.
+`rule_score = 0.6 * keyword_score + 0.3 * business_score + 0.1 * source_score`
 
-Слабые кандидаты отбрасываются по порогу, но для `strategy` при `use_llm=true` действует послабление: цель не отбрасывается до LLM только из-за слабого rule-score.
+## 5.2 LLM rerank (top-N)
 
-## 6.2 LLM этап (rerank)
+Если `useLlm=true`:
 
-Для top-N (`cascade_llm_max_candidates_per_deputy`) вызывается:
+- в LLM уходит top-N кандидатов (`cascade_llm_max_candidates_per_deputy`);
+- LLM возвращает `relevant`, `confidence`, `reason`;
+- пересчитывается `final_score`.
 
-- `assess_goals_relevance_bulk(...)`, результат по `idx`.
+Важное правило:
 
-На кандидате:
+- если `llm_relevant=false`, кандидат исключается из `items`.
 
-- если есть `confidence`, рассчитывается `final_score = clamp(rule_score +/- confidence*0.35)`.
-- если `llm_relevant=false`, кандидат исключается из `items`, а причина сохраняется через `llm_rejections_out` и далее в `unmatched`.
+## 5.3 Trace
 
-## 6.3 Trace
+`traceRule` включает:
 
-В `traceRule` пишется:
+- score-компоненты;
+- process/business/source объяснение;
+- классификацию;
+- LLM-флаги и reason (если были).
 
-- `rule/final/keyword/business/source` scores;
-- тип релевантности (`llm_rerank+process_registry` или `rule_based+process_registry`);
-- `process_match`, `business_match`, `source_reason`;
-- `classification`.
+Также сверху добавляется человекочитаемая префикс-фраза:
 
----
-
-## 7. Стратегия: сопоставление `responsible_person_owner` и deputy
-
-Функция: `_strategy_executor_matches_deputy(...)`.
-
-Порядок:
-
-1. direct `names_match`.
-2. разбор ФИО из строки (включая скобки, списки, сокращения) через `_extract_possible_person_names`.
-3. cache check (ключ: normalized executor + normalized deputy).
-4. если `use_llm=false` -> no match.
-5. token prefilter.
-6. LLM `assess_responsible_executor_match(...)`.
-
-Результат:
-
-- `(match: bool, trace: str)`.
+- `Назначено от руководителя '<manager>' заместителю '<deputy>'. Источник цели: '<source>'.`
 
 ---
 
-## 8. Дедупликация
+## 6) Стратегия: как deputy сопоставляется с `responsible_person_owner`
 
-Используются два набора ключей:
+`_strategy_executor_matches_deputy(...)`:
 
-- `item_seen` для `items`;
-- `fallback_seen` для `fallback_goals`.
+1. direct name match;
+2. parsed name match (разбор из скобок/фрагментов);
+3. cache;
+4. если LLM включен — LLM match (`assess_responsible_executor_match`).
 
-Ключ построен из нормализованных:
+Если match успешен, строка стратегии добавляется в direct-goals deputy.
 
-- manager/deputy,
-- sourceType/sourceRowId,
+---
+
+## 7) Что попадает в `unmatched` (текущее правило)
+
+В `unmatched` попадает **только** deputy-кейс:
+
+- у заместителя одновременно:
+  - нет процессов в `process_registry`;
+  - нет strategy direct-goals.
+
+Поля записи:
+
+- `managerName`
+- `deputyName`
+- `reason = "Не найдены процессы в реестре процессов и цели в стратегии."`
+- `reportYear`
+
+Manager-level причины (`нет source_goals`, `нет deputies`) в текущем поведении в `unmatched` не добавляются.
+
+---
+
+## 8) Нераспределенные board-цели
+
+Если board-цель не получила назначения на основном этапе:
+
+- она добавляется в `items` отдельной строкой;
+- `deputyName` остается пустым;
+- `traceRule` содержит пояснение, что цель не была сопоставлена ни одному заместителю.
+
+---
+
+## 9) Дедупликация
+
+Используются dedup-ключи (нормализованные):
+
+- manager/deputy;
+- sourceType/sourceRowId;
 - sourceGoalTitle/sourceMetric.
 
-Отдельно в `_merge_goal_candidates` merge по key `(sourceType, sourceRowId, goal, metric)` + подъем `classification` до `strategy+process_registry`, если цель пришла из обоих каналов.
+Дубли режутся как при основном назначении, так и при добавлении неназначенных строк.
 
 ---
 
-## 9. Специальные типы строк в `items`
+## 10) Актуальные LLM-промпты
 
-Кроме обычных `board/strategy`, сейчас возможны:
+Ниже — шаблоны промптов из `src/services/cascade_llm.py`.
 
-- `sourceType = not_found`:
-  - когда по конкретному deputy не найдено релевантных целей;
-  - обычно `sourceGoalTitle = "KPI не найдено"`.
-- тип `unassigned` в текущей версии не используется, т.к. нераспределенные board-цели
-  дополнительно назначаются через fallback-кандидатов.
+## 10.1 Bulk relevance prompt (`assess_goals_relevance_bulk`)
+
+```text
+Ты эксперт по каскадированию KPI и процессному управлению.
+Для каждого кандидата цели оцени релевантность процессам сотрудника.
+Верни строго JSON:
+{"items":[{"idx":0,"relevant":true,"confidence":0.0,"reason":""}]}
+
+Сотрудник: {subject_name}
+Процессы сотрудника:
+{process_text}
+
+Кандидаты целей:
+{goals_text}
+```
+
+Где:
+
+- `process_text` — список процессов deputy;
+- `goals_text` — список вида `idx=...; goal=...; metric=...`.
+
+## 10.2 Responsible executor match prompt (`assess_responsible_executor_match`)
+
+```text
+Ты эксперт по оргструктуре и каскадированию целей.
+Определи, соответствует ли строка 'Ответственный исполнитель' конкретному заместителю.
+В строке могут быть сокращения и ФИО в скобках, например: 'ДЦР (Пинчук Ю.В.)'.
+Верни строго JSON без пояснений:
+{"match": true|false, "confidence": 0..1, "reason": "кратко"}
+
+Заместитель (эталон): {deputy_name}
+Ответственный исполнитель (из стратегии): {responsible_executor}
+Цель: {goal_title}
+Инициатива: {initiative}
+```
+
+## 10.3 Одиночный relevance prompt (`assess_goal_relevance`)
+
+```text
+Ты эксперт по каскадированию KPI и процессному управлению.
+Оцени, релевантна ли цель руководителя процессам сотрудника из реестра процессов.
+Верни строго JSON без пояснений:
+{"relevant": true|false, "confidence": 0..1, "reason": "кратко"}
+
+Сотрудник (получатель цели): {subject_name}
+Процессы сотрудника:
+{process_text}
+
+Цель руководителя: {goal_title}
+Метрика цели: {goal_metric}
+```
 
 ---
 
-## 10. Конфигурация LLM (из `src/core/config.py`)
-
-Ключевые настройки:
+## 11) Ключевые настройки (`src/core/config.py`)
 
 - `enable_cascade_llm`
-- `cascade_llm_judge_model` (default `qwen3:8b`)
+- `cascade_llm_judge_model`
 - `cascade_llm_fallback_model`
 - `cascade_llm_timeout_sec`
 - `cascade_llm_max_candidates_per_deputy`
 
-Транспорт:
-
-- через `chat_completion(..., use_ollama=True)`;
-- JSON extraction с fallback на вторую модель.
-
 ---
 
-## 11. Почему в выдаче могут быть пустые `managerName` или `deputyName`
+## 12) Что проверять при отладке
 
-Это не ошибка парсинга, а часть правил:
-
-- `managerName=""` в `not_found`-строках добавляется специально (по бизнес-требованию).
-- `deputyName=""` в текущем алгоритме для board-целей больше не целевой сценарий:
-  такие цели дораспределяются fallback-механизмом по заместителям.
-
----
-
-## 12. Практическая интерпретация результата
-
-В UI полезно воспринимать результат в 3 слоя:
-
-1. `items` — итоговые назначения (включая технические `not_found` для случаев без процессов/релевантности).
-2. `unmatched` — почему не удалось сопоставить (человекочитаемые причины).
-3. `fallback_goals` — резервный пул, который можно рассматривать отдельно от целевых назначений.
-
-Для аналитики качества алгоритма используйте:
-
-- долю `items` с `sourceType=not_found`;
-- количество `llm_relevant=false` в `unmatched`;
-- долю fallback к total items;
-- распределение `classification` в `traceRule`.
+1. Есть ли у manager board-цели в выбранном `report_year`.
+2. Есть ли связка manager -> deputy в `staff`.
+3. Есть ли процессы deputy в `process_registry`.
+4. Есть ли strategy direct-goals deputy.
+5. Что написано в `traceRule` (rule/llm/fallback пояснения).
+6. Что попало в `unmatched` (должны быть только deputy без процессов и без стратегии).
 

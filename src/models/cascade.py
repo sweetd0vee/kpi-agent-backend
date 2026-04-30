@@ -30,6 +30,7 @@ class CascadeGoalItem(BaseModel):
 
 class CascadeUnmatchedManager(BaseModel):
     managerName: str
+    deputyName: str = ""
     reason: str
     reportYear: str = ""
 
