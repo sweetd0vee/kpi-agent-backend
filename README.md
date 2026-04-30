@@ -13,11 +13,13 @@
 - **docx**, **jspdf**, **jspdf-autotable**, **xlsx** — работа с документами (чтение/экспорт)
 
 ### Структура и функционал
-- **Layout** — боковое меню (КПЭ, ППР, База знаний, Чат, Дашборды).
+- **Layout** — боковое меню (КПЭ, ППР, База знаний, Каскадирование, Чат, Дашборды).
 - **Страницы:**
   - **КПЭ** (`/kpi`) — работа с KPI.
   - **ППР** (`/goals`) — цели (План профессионального развития / цели подразделений).
   - **База знаний** (`/knowledge`) — импорт документов: загрузка в коллекции, типы документов (цели председателя, чеклисты стратегии/регламента/бизнес-плана и т.д.).
+  - **Каскадирование** (`/cascade`) — запуск каскадирования manager -> deputy, история запусков, экспорт `Каскадированных целей` и `Резервных целей для несопоставленных`.
+    - Опция: **«Использовать LLM-фильтрацию целей по реестру процессов и стратегии»**.
   - **Чат с моделью** (`/chat`) — диалог с LLM, прикрепление документов из базы знаний.
   - **Дашборды** (`/dashboards`) — визуализация целей и метрик.
 
@@ -45,15 +47,19 @@ npm run dev   # http://localhost:5173
 ### Алгоритм и модули
 - **Документы и коллекции** — загрузка файлов, индекс в `uploads/index.json`, коллекции в `uploads/collections.json`. При `USE_MINIO=true` файлы хранятся в бакетах MinIO по типу документа (goals, strategy, regulation, department-regulation, business-plan). При удалении коллекции удаляются и все её файлы (в т.ч. в MinIO).
 - **Предобработка** — извлечение текста из файла, отправка в LLM (Open Web UI), сохранение результата как JSON в хранилище.
-- **Чат и каскадирование** — API `/api/chat/completions` и `/api/chat/cascade` зарезервированы под вызов LLM и сценарий каскадирования (LangGraph) — в разработке.
-- **Дашборд** — `/api/dashboard/goals` (иерархия целей), `/api/dashboard/metrics` (метрики KPI) — заглушки, данные планируются из разбора документов и результата каскада.
+- **Каскадирование целей** — рабочий backend-сервис (`src/services/cascade_service.py`), источники `leader/board/strategy/staff/process_registry`, двухэтапная фильтрация (rule-based + LLM rerank), сохранение истории запусков.
+  - При `llm_relevant=false` цель не попадает в `items`, а причина сохраняется в `unmatched`.
+  - Если не найдено, кому каскадировать цель, такая цель возвращается в `items` с пустым `deputyName`.
+- **Чат** — `POST /api/chat/completions`.
+- **Дашборды** — визуализации строятся из табличных данных целей.
 
 ### API (кратко)
 | Группа | Эндпоинты |
 |--------|------------|
 | **documents** | `POST /upload`, `GET /`, `GET /types`, `GET /{id}`, `DELETE /{id}`, `POST /{id}/preprocess` |
 | **collections** | `GET/POST /`, `GET/PATCH/DELETE /{id}`, `GET /{id}/context` (возвращает `content`, `document_count`, `included_count`), `POST /{id}/generate-json`, `POST /{id}/sync-openwebui` |
-| **chat** | `POST /completions`, `POST /cascade` |
+| **chat** | `POST /completions` |
+| **cascade** | `POST /run`, `GET /runs`, `GET /runs/{run_id}`, `DELETE /runs/{run_id}`, `POST /runs/{run_id}/delete` |
 | **dashboard** | `GET /goals`, `GET /metrics` |
 
 ### База данных
@@ -91,11 +97,15 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 
 Если использовать Open Web UI вместо Ollama: `USE_OLLAMA_FOR_PREPROCESS=false`, задать `OPEN_WEBUI_URL` и `OPEN_WEBUI_API_KEY`.
 
-**Финальная генерация (каскад/итоговая таблица)** должна выполняться **сильной моделью**:
+**Каскадирование (LLM judge в табличном каскаде)**:
 
-- По умолчанию используется Open Web UI / OpenAI с моделью `LLM_CASCADE_MODEL` (например, через Open Web UI).
-- Если хотите сильную **локальную** модель в Ollama: `USE_OLLAMA_FOR_CASCADE=true`, указать `OLLAMA_CASCADE_MODEL`, и установить модель командой `ollama pull <model>`.
-- Рекомендуемые сильные модели (примерный список): `qwen:32b`, `llama3.1:70b` (выберите подходящую под ресурсы).
+- Основная judge-модель: `CASCADE_LLM_JUDGE_MODEL` (текущий дефолт: `qwen3:8b`).
+- Резервная модель: `CASCADE_LLM_FALLBACK_MODEL` (используется при ошибке/таймауте основной).
+- Таймаут LLM проверки: `CASCADE_LLM_TIMEOUT_SEC`.
+- Ограничение LLM top-N на заместителя: `CASCADE_LLM_MAX_CANDIDATES_PER_DEPUTY`.
+- Включение этапа LLM: `ENABLE_CASCADE_LLM` (в UI это переключатель `useLlm`).
+
+Подробная документация по алгоритму каскадирования: `../BACKEND_CASCADE_GUIDE.md`.
 
 ---
 
